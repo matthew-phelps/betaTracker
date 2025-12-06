@@ -18,6 +18,9 @@ struct WeeklyDistanceView: View {
     @State private var hasAttemptedInitialFetch = false
     @State private var numberOfWeeks = 10 // Number of weeks to display in chart
 
+    // Cache current week to avoid recalculation
+    private let currentWeek = Date().startOfWeek()
+
     var body: some View {
         NavigationView {
             Group {
@@ -205,9 +208,7 @@ struct WeeklyDistanceView: View {
     }
 
     private var dailyDistanceChart: some View {
-        let weeklyData = getWeeklyDistances()
-
-        return VStack(alignment: .leading, spacing: 15) {
+        VStack(alignment: .leading, spacing: 15) {
             HStack {
                 Text("Weekly Distances")
                     .font(.headline)
@@ -237,21 +238,8 @@ struct WeeklyDistanceView: View {
             }
             .padding(.horizontal)
 
-            Chart(weeklyData, id: \.weekStart) { item in
-                LineMark(
-                    x: .value("Week", item.weekStart, unit: .weekOfYear),
-                    y: .value("Distance", item.distance)
-                )
-                .foregroundStyle(.blue)
-                .lineStyle(StrokeStyle(lineWidth: 3))
+            weeklyChart
 
-                PointMark(
-                    x: .value("Week", item.weekStart, unit: .weekOfYear),
-                    y: .value("Distance", item.distance)
-                )
-                .foregroundStyle(.blue)
-                .symbolSize(60)
-            }
             .chartXAxis {
                 AxisMarks(values: .stride(by: .weekOfYear)) { value in
                     if let date = value.as(Date.self) {
@@ -286,23 +274,71 @@ struct WeeklyDistanceView: View {
         .cornerRadius(12)
     }
 
+    // MARK: - Chart Components
+
+    private var weeklyChart: some View {
+        let weeklyData = getWeeklyDistances()
+        let currentYear = Calendar.current.component(.year, from: currentWeek).description
+        let previousYear = (Calendar.current.component(.year, from: currentWeek) - 1).description
+
+        return Chart(weeklyData, id: \.weekStart) { item in
+            LineMark(
+                x: .value("Week", item.weekStart, unit: .weekOfYear),
+                y: .value("Distance", item.distance)
+            )
+            .foregroundStyle(by: .value("Year", item.year))
+            .lineStyle(by: .value("Year", item.year))
+
+            PointMark(
+                x: .value("Week", item.weekStart, unit: .weekOfYear),
+                y: .value("Distance", item.distance)
+            )
+            .foregroundStyle(by: .value("Year", item.year))
+            .symbolSize(50)
+        }
+        .chartForegroundStyleScale([
+            currentYear: .blue,
+            previousYear: .orange
+        ])
+        .chartLineStyleScale([
+            currentYear: StrokeStyle(lineWidth: 3),
+            previousYear: StrokeStyle(lineWidth: 2, dash: [5, 3])
+        ])
+        .animation(.none, value: numberOfWeeks)
+    }
+
     // MARK: - Weekly Data Calculation
 
-    /// Get weekly distance totals for the specified number of weeks
-    private func getWeeklyDistances() -> [(weekStart: Date, distance: Double)] {
+    /// Get weekly distance totals for the specified number of weeks, including previous year
+    private func getWeeklyDistances() -> [(weekStart: Date, distance: Double, year: String)] {
+        // Pre-allocate array for better performance
+        var weeklyData: [(weekStart: Date, distance: Double, year: String)] = []
+        weeklyData.reserveCapacity(numberOfWeeks * 2) // Current + previous year
+
         let calendar = Calendar.current
-        var weeklyData: [(weekStart: Date, distance: Double)] = []
+        let currentYear = calendar.component(.year, from: currentWeek)
+        let previousYear = currentYear - 1
 
-        // Start from current week and go back
-        let currentWeek = Date().startOfWeek()
-
+        // Calculate all week dates at once
         for weekOffset in (0..<numberOfWeeks).reversed() {
             guard let weekStart = calendar.date(byAdding: .weekOfYear, value: -weekOffset, to: currentWeek) else {
                 continue
             }
 
-            let distance = dataManager.totalDistanceForWeek(startDate: weekStart)
-            weeklyData.append((weekStart: weekStart, distance: distance))
+            // Current year data
+            let currentDistance = dataManager.totalDistanceForWeek(startDate: weekStart)
+            weeklyData.append((weekStart: weekStart, distance: currentDistance, year: "\(currentYear)"))
+
+            // Previous year data - same week number, previous year
+            guard let previousYearWeek = calendar.date(byAdding: .year, value: -1, to: weekStart) else {
+                continue
+            }
+
+            let previousDistance = dataManager.totalDistanceForWeek(startDate: previousYearWeek)
+            // Only add previous year data if there's actual distance (avoid plotting zeros)
+            if previousDistance > 0 {
+                weeklyData.append((weekStart: weekStart, distance: previousDistance, year: "\(previousYear)"))
+            }
         }
 
         return weeklyData

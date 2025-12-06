@@ -19,8 +19,12 @@ class ActivityDataManager: ObservableObject {
     private let cacheTimestampKey = "activitiesCacheTimestamp"
     private var isFetching = false // Prevent concurrent fetches
 
+    // Cached weekly totals for performance
+    private var weeklyTotalsCache: [Date: Double] = [:]
+
     init() {
         loadCachedActivities()
+        buildWeeklyTotalsCache()
     }
 
     /// Fetch activities from Strava and cache them
@@ -52,6 +56,9 @@ class ActivityDataManager: ObservableObject {
             // Cache the activities
             cacheActivities()
 
+            // Rebuild weekly totals cache
+            buildWeeklyTotalsCache()
+
             print("DEBUG: Successfully fetched and cached \(activities.count) cycling activities")
 
             isLoading = false
@@ -81,10 +88,19 @@ class ActivityDataManager: ObservableObject {
         }
     }
 
-    /// Get total distance for a week (in km)
+    /// Get total distance for a week (in km) - uses cache for performance
     func totalDistanceForWeek(startDate: Date) -> Double {
-        activitiesForWeek(startDate: startDate)
+        // Use cached value if available
+        if let cachedDistance = weeklyTotalsCache[startDate] {
+            return cachedDistance
+        }
+
+        // Calculate and cache if not found
+        let distance = activitiesForWeek(startDate: startDate)
             .reduce(0) { $0 + $1.distanceKm }
+
+        weeklyTotalsCache[startDate] = distance
+        return distance
     }
 
     /// Get daily distances for a week
@@ -146,5 +162,29 @@ class ActivityDataManager: ObservableObject {
     /// Get the last cache timestamp
     func lastCacheDate() -> Date? {
         UserDefaults.standard.object(forKey: cacheTimestampKey) as? Date
+    }
+
+    // MARK: - Performance Optimization
+
+    /// Build cache of weekly totals for fast lookups
+    private func buildWeeklyTotalsCache() {
+        weeklyTotalsCache.removeAll()
+
+        // Group activities by week
+        let calendar = Calendar.current
+        var weeklyGroups: [Date: [StravaActivity]] = [:]
+
+        for activity in activities {
+            let weekStart = activity.localDate.startOfWeek()
+            weeklyGroups[weekStart, default: []].append(activity)
+        }
+
+        // Calculate totals for each week
+        for (weekStart, weekActivities) in weeklyGroups {
+            let totalDistance = weekActivities.reduce(0) { $0 + $1.distanceKm }
+            weeklyTotalsCache[weekStart] = totalDistance
+        }
+
+        print("DEBUG: Built weekly cache with \(weeklyTotalsCache.count) weeks")
     }
 }
