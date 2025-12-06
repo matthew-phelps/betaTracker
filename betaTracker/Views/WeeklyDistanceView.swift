@@ -18,6 +18,7 @@ struct WeeklyDistanceView: View {
     @State private var hasAttemptedInitialFetch = false
     @State private var numberOfWeeks = 10 // Number of weeks to display in chart
     @State private var rollingDays = 365 // Number of days to show in rolling chart
+    @State private var selectedActivityType: String? = nil // nil means "all activities"
 
     // Cache current week to avoid recalculation
     private let currentWeek = Date().startOfWeek()
@@ -114,6 +115,11 @@ struct WeeklyDistanceView: View {
                 // Week navigation
                 weekNavigationView
 
+                // Activity type selector
+                if !dataManager.availableActivityTypes.isEmpty {
+                    activityTypeSelector
+                }
+
                 // Total distance display
                 totalDistanceCard
 
@@ -170,13 +176,59 @@ struct WeeklyDistanceView: View {
         .cornerRadius(12)
     }
 
+    private var activityTypeSelector: some View {
+        VStack(spacing: 12) {
+            Text("Activity Type")
+                .font(.headline)
+                .foregroundColor(.secondary)
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 10) {
+                    // "All" button
+                    Button(action: {
+                        selectedActivityType = nil
+                    }) {
+                        Text("All")
+                            .font(.subheadline)
+                            .fontWeight(selectedActivityType == nil ? .semibold : .regular)
+                            .foregroundColor(selectedActivityType == nil ? .white : .blue)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(selectedActivityType == nil ? Color.blue : Color.blue.opacity(0.1))
+                            .cornerRadius(20)
+                    }
+
+                    // Individual activity type buttons
+                    ForEach(dataManager.availableActivityTypes, id: \.self) { activityType in
+                        Button(action: {
+                            selectedActivityType = activityType
+                        }) {
+                            Text(activityType)
+                                .font(.subheadline)
+                                .fontWeight(selectedActivityType == activityType ? .semibold : .regular)
+                                .foregroundColor(selectedActivityType == activityType ? .white : .blue)
+                                .padding(.horizontal, 16)
+                                .padding(.vertical, 8)
+                                .background(selectedActivityType == activityType ? Color.blue : Color.blue.opacity(0.1))
+                                .cornerRadius(20)
+                        }
+                    }
+                }
+                .padding(.horizontal)
+            }
+        }
+        .padding(.vertical)
+        .background(Color.cardBackground)
+        .cornerRadius(12)
+    }
+
     private var totalDistanceCard: some View {
         VStack(spacing: 10) {
             Text("Total Distance")
                 .font(.headline)
                 .foregroundColor(.secondary)
 
-            let totalDistance = dataManager.totalDistanceForWeek(startDate: currentWeekStart)
+            let totalDistance = dataManager.totalDistanceForWeek(startDate: currentWeekStart, activityType: selectedActivityType)
             Text(String(format: "%.1f km", totalDistance))
                 .font(.system(size: 60, weight: .bold, design: .rounded))
                 .foregroundColor(.blue)
@@ -188,15 +240,16 @@ struct WeeklyDistanceView: View {
     }
 
     private var rideCountCard: some View {
-        let rideCount = dataManager.activitiesForWeek(startDate: currentWeekStart).count
+        let rideCount = dataManager.activitiesForWeek(startDate: currentWeekStart, activityType: selectedActivityType).count
+        let activityLabel = activityCountLabel(for: selectedActivityType, count: rideCount)
 
         return HStack(spacing: 15) {
-            Image(systemName: "bicycle.circle.fill")
+            Image(systemName: activityIcon(for: selectedActivityType))
                 .font(.system(size: 40))
                 .foregroundColor(.green)
 
             VStack(alignment: .leading) {
-                Text("Rides")
+                Text(activityLabel)
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                 Text("\(rideCount)")
@@ -312,7 +365,7 @@ struct WeeklyDistanceView: View {
     }
 
     private var rolling12MonthChart: some View {
-        let rollingData = dataManager.getRolling12MonthTotals(days: rollingDays)
+        let rollingData = dataManager.getRolling12MonthTotals(days: rollingDays, activityType: selectedActivityType)
 
         return VStack(alignment: .leading, spacing: 15) {
             HStack {
@@ -408,7 +461,7 @@ struct WeeklyDistanceView: View {
             }
 
             // Current year data
-            let currentDistance = dataManager.totalDistanceForWeek(startDate: weekStart)
+            let currentDistance = dataManager.totalDistanceForWeek(startDate: weekStart, activityType: selectedActivityType)
             weeklyData.append((weekStart: weekStart, distance: currentDistance, year: "\(currentYear)"))
 
             // Previous year data - same week number, previous year
@@ -416,7 +469,7 @@ struct WeeklyDistanceView: View {
                 continue
             }
 
-            let previousDistance = dataManager.totalDistanceForWeek(startDate: previousYearWeek)
+            let previousDistance = dataManager.totalDistanceForWeek(startDate: previousYearWeek, activityType: selectedActivityType)
             // Only add previous year data if there's actual distance (avoid plotting zeros)
             if previousDistance > 0 {
                 weeklyData.append((weekStart: weekStart, distance: previousDistance, year: "\(previousYear)"))
@@ -527,6 +580,58 @@ struct WeeklyDistanceView: View {
     private func loadAccessToken() {
         if let token = UserDefaults.standard.string(forKey: "stravaAccessToken") {
             accessToken = token
+        }
+    }
+
+    // MARK: - Activity Type Helpers
+
+    private func activityIcon(for type: String?) -> String {
+        guard let type = type else {
+            return "figure.mixed.cardio"
+        }
+
+        switch type {
+        case "Ride", "VirtualRide", "EBikeRide":
+            return "bicycle.circle.fill"
+        case "Run", "VirtualRun":
+            return "figure.run.circle.fill"
+        case "Walk":
+            return "figure.walk.circle.fill"
+        case "Swim":
+            return "figure.pool.swim.circle.fill"
+        case "Hike":
+            return "figure.hiking.circle.fill"
+        case "WeightTraining":
+            return "dumbbell.fill"
+        case "Yoga":
+            return "figure.cooldown"
+        default:
+            return "figure.mixed.cardio"
+        }
+    }
+
+    private func activityCountLabel(for type: String?, count: Int) -> String {
+        guard let type = type else {
+            return "Activities"
+        }
+
+        switch type {
+        case "Ride", "VirtualRide", "EBikeRide":
+            return count == 1 ? "Ride" : "Rides"
+        case "Run", "VirtualRun":
+            return count == 1 ? "Run" : "Runs"
+        case "Walk":
+            return count == 1 ? "Walk" : "Walks"
+        case "Swim":
+            return count == 1 ? "Swim" : "Swims"
+        case "Hike":
+            return count == 1 ? "Hike" : "Hikes"
+        case "WeightTraining":
+            return count == 1 ? "Session" : "Sessions"
+        case "Yoga":
+            return count == 1 ? "Session" : "Sessions"
+        default:
+            return count == 1 ? "Activity" : "Activities"
         }
     }
 }

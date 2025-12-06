@@ -14,16 +14,18 @@ class ActivityDataManager: ObservableObject {
     @Published var activities: [StravaActivity] = []
     @Published var isLoading = false
     @Published var errorMessage: String?
+    @Published var availableActivityTypes: [String] = []
 
     private let cacheKey = "cachedStravaActivities"
     private let cacheTimestampKey = "activitiesCacheTimestamp"
     private var isFetching = false // Prevent concurrent fetches
 
-    // Cached weekly totals for performance
-    private var weeklyTotalsCache: [Date: Double] = [:]
+    // Cached weekly totals for performance, keyed by activity type
+    private var weeklyTotalsCache: [String: [Date: Double]] = [:]
 
     init() {
         loadCachedActivities()
+        updateAvailableActivityTypes()
         buildWeeklyTotalsCache()
     }
 
@@ -50,11 +52,14 @@ class ActivityDataManager: ObservableObject {
         do {
             let fetchedActivities = try await StravaAPIService.shared.fetchAllActivities(accessToken: accessToken)
 
-            // Filter for cycling activities only
-            activities = fetchedActivities.filter { $0.isCyclingActivity }
+            // Store all activities (no filtering by type)
+            activities = fetchedActivities
 
             // Cache the activities
             cacheActivities()
+
+            // Update available activity types
+            updateAvailableActivityTypes()
 
             // Rebuild weekly totals cache
             buildWeeklyTotalsCache()
@@ -76,35 +81,42 @@ class ActivityDataManager: ObservableObject {
         }
     }
 
-    /// Get cycling activities for a specific week
-    func activitiesForWeek(startDate: Date) -> [StravaActivity] {
+    /// Get activities for a specific week, optionally filtered by activity type
+    func activitiesForWeek(startDate: Date, activityType: String? = nil) -> [StravaActivity] {
         let calendar = Calendar.current
         guard let weekEnd = calendar.date(byAdding: .day, value: 7, to: startDate) else {
             return []
         }
 
         return activities.filter { activity in
-            activity.localDate >= startDate && activity.localDate < weekEnd
+            let dateMatch = activity.localDate >= startDate && activity.localDate < weekEnd
+            let typeMatch = activityType == nil || activity.type == activityType
+            return dateMatch && typeMatch
         }
     }
 
     /// Get total distance for a week (in km) - uses cache for performance
-    func totalDistanceForWeek(startDate: Date) -> Double {
+    func totalDistanceForWeek(startDate: Date, activityType: String? = nil) -> Double {
+        let cacheKey = activityType ?? "all"
+
         // Use cached value if available
-        if let cachedDistance = weeklyTotalsCache[startDate] {
+        if let cachedDistance = weeklyTotalsCache[cacheKey]?[startDate] {
             return cachedDistance
         }
 
         // Calculate and cache if not found
-        let distance = activitiesForWeek(startDate: startDate)
+        let distance = activitiesForWeek(startDate: startDate, activityType: activityType)
             .reduce(0) { $0 + $1.distanceKm }
 
-        weeklyTotalsCache[startDate] = distance
+        if weeklyTotalsCache[cacheKey] == nil {
+            weeklyTotalsCache[cacheKey] = [:]
+        }
+        weeklyTotalsCache[cacheKey]?[startDate] = distance
         return distance
     }
 
-    /// Get daily distances for a week
-    func dailyDistancesForWeek(startDate: Date) -> [(date: Date, distance: Double)] {
+    /// Get daily distances for a week, optionally filtered by activity type
+    func dailyDistancesForWeek(startDate: Date, activityType: String? = nil) -> [(date: Date, distance: Double)] {
         let calendar = Calendar.current
         var dailyDistances: [(date: Date, distance: Double)] = []
 
@@ -115,7 +127,11 @@ class ActivityDataManager: ObservableObject {
 
             let dayStart = calendar.startOfDay(for: currentDay)
             let distanceForDay = activities
-                .filter { $0.localDate == dayStart }
+                .filter { activity in
+                    let dateMatch = activity.localDate == dayStart
+                    let typeMatch = activityType == nil || activity.type == activityType
+                    return dateMatch && typeMatch
+                }
                 .reduce(0) { $0 + $1.distanceKm }
 
             dailyDistances.append((date: dayStart, distance: distanceForDay))
@@ -166,37 +182,62 @@ class ActivityDataManager: ObservableObject {
 
     // MARK: - Performance Optimization
 
+    /// Update the list of available activity types from the data
+    private func updateAvailableActivityTypes() {
+        let types = Set(activities.map { $0.type })
+        availableActivityTypes = Array(types).sorted()
+        print("DEBUG: Found \(availableActivityTypes.count) activity types: \(availableActivityTypes)")
+    }
+
     /// Build cache of weekly totals for fast lookups
     private func buildWeeklyTotalsCache() {
         weeklyTotalsCache.removeAll()
 
-        // Group activities by week
         let calendar = Calendar.current
-        var weeklyGroups: [Date: [StravaActivity]] = [:]
 
+        // Build cache for "all" activities
+        var allWeeklyGroups: [Date: [StravaActivity]] = [:]
         for activity in activities {
             let weekStart = activity.localDate.startOfWeek()
-            weeklyGroups[weekStart, default: []].append(activity)
+            allWeeklyGroups[weekStart, default: []].append(activity)
         }
 
-        // Calculate totals for each week
-        for (weekStart, weekActivities) in weeklyGroups {
+        weeklyTotalsCache["all"] = [:]
+        for (weekStart, weekActivities) in allWeeklyGroups {
             let totalDistance = weekActivities.reduce(0) { $0 + $1.distanceKm }
-            weeklyTotalsCache[weekStart] = totalDistance
+            weeklyTotalsCache["all"]?[weekStart] = totalDistance
         }
 
-        print("DEBUG: Built weekly cache with \(weeklyTotalsCache.count) weeks")
+        // Build cache for each activity type
+        for activityType in availableActivityTypes {
+            var weeklyGroups: [Date: [StravaActivity]] = [:]
+
+            for activity in activities where activity.type == activityType {
+                let weekStart = activity.localDate.startOfWeek()
+                weeklyGroups[weekStart, default: []].append(activity)
+            }
+
+            weeklyTotalsCache[activityType] = [:]
+            for (weekStart, weekActivities) in weeklyGroups {
+                let totalDistance = weekActivities.reduce(0) { $0 + $1.distanceKm }
+                weeklyTotalsCache[activityType]?[weekStart] = totalDistance
+            }
+        }
+
+        print("DEBUG: Built weekly cache for \(weeklyTotalsCache.keys.count) activity types")
     }
 
     // MARK: - Daily and Rolling Calculations
 
-    /// Get daily distance totals sorted by date
-    func getDailyTotals() -> [(date: Date, distance: Double)] {
+    /// Get daily distance totals sorted by date, optionally filtered by activity type
+    func getDailyTotals(activityType: String? = nil) -> [(date: Date, distance: Double)] {
         var dailyGroups: [Date: Double] = [:]
 
         // Sum distances for each day
         for activity in activities {
-            dailyGroups[activity.localDate, default: 0] += activity.distanceKm
+            if activityType == nil || activity.type == activityType {
+                dailyGroups[activity.localDate, default: 0] += activity.distanceKm
+            }
         }
 
         // Convert to array and sort by date
@@ -205,9 +246,9 @@ class ActivityDataManager: ObservableObject {
             .sorted { $0.date < $1.date }
     }
 
-    /// Calculate rolling 12-month totals for the specified number of days
-    func getRolling12MonthTotals(days: Int) -> [(date: Date, total: Double)] {
-        let dailyTotals = getDailyTotals()
+    /// Calculate rolling 12-month totals for the specified number of days, optionally filtered by activity type
+    func getRolling12MonthTotals(days: Int, activityType: String? = nil) -> [(date: Date, total: Double)] {
+        let dailyTotals = getDailyTotals(activityType: activityType)
         guard !dailyTotals.isEmpty else { return [] }
 
         let calendar = Calendar.current
