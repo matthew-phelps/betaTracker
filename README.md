@@ -1,136 +1,287 @@
-# Strava Cycling Tracker
+# betaTracker
 
-A personal iOS app built with SwiftUI to track and visualize your Strava cycling data. View weekly cycling statistics including total distance, number of rides, and daily distance charts.
+A Strava activity tracking application for iOS and macOS that supports multiple household users with individual profiles.
+
+## Overview
+
+betaTracker allows multiple people in a household to track their Strava activities using a single app installation. Each user has their own profile with separate Strava API credentials, avoiding Strava's athlete connection limits.
 
 ## Features
 
-- **Simple Authentication**: Manually input your Strava access token (no OAuth needed)
-- **Complete Activity History**: Automatically fetches ALL your cycling activities using pagination
-- **Weekly Summary View**:
-  - Large, prominent total distance display (in km)
-  - Number of rides for the week
-  - Bar chart showing daily distances
-- **Week Navigation**: Browse through all your historical weeks back to your first ride
-- **Smart Caching**: Activities are cached locally to minimize API calls
-- **Refresh on Demand**: Update with new rides via the refresh button
+### Multi-User Profile System
+- Create unlimited user profiles
+- Each profile has isolated data and authentication
+- Quick profile switching via sidebar
+- Profile-specific data caching and sync timestamps
+
+### Activity Tracking
+- Sync all your Strava activities (Run, Ride, Swim, etc.)
+- Automatic activity caching for offline viewing
+- Filter by activity type
+- Auto-defaults to your most active type
+
+### Visualization Charts
+
+#### 1. Current Week Summary
+- Large display of total distance for the current week
+- Activity count with type-specific icons
+- Week date range navigation
+- Previous/next week buttons
+
+#### 2. Speed & Pace Analysis
+- 1-month moving average of speed/pace over time
+- **Running**: Shows pace (min:sec per km)
+- **Cycling**: Shows speed (km/h)
+- **Distance filtering**:
+  - Running: 5, 10, 15, 20, 30+ km
+  - Cycling: 20, 40, 60, 80, 100+ km
+  - All activities: 5, 10, 20, 40, 60+ km
+- Time periods: 3, 6, 12, 24 months
+- Weekly data points for granular trends
+
+#### 3. Weekly Summary
+- Distance trends over time
+- **Current year** (blue solid line) vs **previous year** (orange dashed line) comparison
+- Time periods: 1, 2, 6, 12, 24 months
+- Dynamic axis labeling based on time window
+- Weekly data points
+
+#### 4. 12-Month Rolling Total
+- Rolling 12-month cumulative distance
+- **Current period** (blue) vs **previous period** (orange) comparison
+- Relative day axis (day 0 = today, negative = past)
+- Calendar dates shown below for current period orientation
+- Time windows: 6 months, 1 year, 2 years
+
+### Authentication
+- OAuth 2.0 with PKCE for secure Strava authentication
+- Automatic token refresh when expired
+- Per-profile token management in Keychain
 
 ## Getting Started
 
 ### Prerequisites
+- macOS 14.0+ or iOS 17.0+
+- Xcode 15.0+
+- Strava account
 
-- Xcode 14+ (for iOS 16+ Swift Charts support)
-- iOS 16+ device or simulator
-- Strava account with API access
+### Strava API Setup
 
-### Getting Your Strava Access Token
+Each user needs their own Strava API application:
 
-1. Go to [https://www.strava.com/settings/api](https://www.strava.com/settings/api)
-2. Create an application (if you haven't already)
-3. Note your **Access Token** from the API settings page
-4. For testing, you can use the temporary access token shown
-5. For longer-term use, you may want to generate a refresh token
+1. Go to https://www.strava.com/settings/api
+2. Create a new API application
+3. Set **Authorization Callback Domain** to: `localhost`
+4. Note your **Client ID** and **Client Secret**
 
 ### Installation
 
-1. Clone this repository
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/betaTracker.git
+   cd betaTracker
+   ```
+
 2. Open `betaTracker.xcodeproj` in Xcode
-3. Select your target device/simulator (iOS 16+)
-4. Build and run (Cmd + R)
 
-### First-Time Setup
+3. Build and run (⌘R)
 
-1. When you first launch the app, you'll be prompted to enter your Strava access token
-2. Paste your token and tap "Save Token"
-3. The app will automatically fetch all your cycling activities (this may take a moment)
-4. Once loaded, you'll see your current week's cycling statistics
+### First Time Setup
+
+1. **Create a Profile**:
+   - When the app launches, tap "Create Profile"
+   - Enter your name
+   - Enter your Strava API Client ID
+   - Enter your Strava API Client Secret
+   - Tap "Save"
+
+2. **Connect to Strava**:
+   - Tap the menu icon (⋯) in the toolbar
+   - Select "Connect to Strava"
+   - Authorize the app in your browser
+   - You'll be redirected back to the app
+
+3. **Sync Activities**:
+   - Tap the menu icon (⋯) in the toolbar
+   - Select "Refresh Activities"
+   - Wait for all activities to sync (may take a moment for large histories)
+   - Your data is now cached locally for offline viewing
 
 ## Usage
 
-### Main View
+### Switching Profiles
 
-- **Total Distance**: Large display showing your total km for the selected week
-- **Rides**: Number of cycling activities for the week
-- **Daily Distance Chart**: Bar chart showing distance for each day of the week
+**In the sidebar:**
+1. Click the profile selector
+2. Choose a different profile from the dropdown menu
+3. Or select "Manage Profiles" to create/edit/delete profiles
 
-### Navigation
+Your data automatically reloads when switching profiles.
 
-- **Previous/Next Week**: Browse through your cycling history
-- **Today Button**: Quickly jump back to the current week
-- **Menu (⋯)**:
-  - Refresh Activities: Fetch new rides from Strava
-  - Update Token: Change your access token
+### Viewing Different Chart Types
 
-### Activity Types
+**Select chart type** using the buttons at the top:
+- **Current Week** - This week's summary with large distance display
+- **Speed & Pace** - Moving average speed/pace analysis with distance filtering
+- **Weekly Summary** - Long-term distance trends with year-over-year comparison
+- **12-Month Rolling** - Cumulative progress with period comparison
 
-The app filters for these Strava activity types:
-- Ride (regular cycling)
-- VirtualRide (indoor cycling, Zwift, etc.)
-- EBikeRide (e-bike rides)
+**Sidebar filters:**
+- **Activity Type** - Auto-defaults to most active type, or select All/Run/Ride/etc.
+- **Date Range** - Navigate weeks (for Current Week view)
 
-## Technical Details
+**Chart-specific controls:**
+- **Speed & Pace**:
+  - Distance filter (purple) - Filter activities by minimum distance
+  - Time period (green) - 3, 6, 12, or 24 months
+- **Weekly Summary**: Time period - 1, 2, 6, 12, or 24 months
+- **12-Month Rolling**: Time window - 6 months, 1 year, or 2 years
 
-### Architecture
+### Refreshing Data
 
-- **SwiftUI**: Modern declarative UI framework
-- **Swift Charts**: Native iOS charting for data visualization
-- **URLSession**: Async/await API calls to Strava
-- **UserDefaults**: Token storage and activity caching
-- **@MainActor**: Thread-safe state management
+- **Manual refresh**: Menu (⋯) → "Refresh Activities"
+- **Check last sync**: Look in the sidebar for "Last Synced" timestamp
+- **When to refresh**: Only when you have new activities (data is cached locally)
 
-### Strava API
+### Managing Cache
 
-- Endpoint: `https://www.strava.com/api/v3/athlete/activities`
-- Pagination: Fetches 200 activities per request until all data is retrieved
-- Rate limiting: 0.1 second delay between pagination requests
+- **Clear cache for current profile**: Menu (⋯) → "Clear Cache"
+- **Clear cache for specific profile**: Manage Profiles → Profile menu (⋯) → "Clear Cache"
+- **What clearing does**: Removes all locally stored activities (requires re-sync)
 
-### Data Storage
+### Disconnecting from Strava
 
-- **Access Token**: Stored in UserDefaults (`stravaAccessToken`)
-- **Activities Cache**: JSON-encoded activities in UserDefaults
-- **Cache Timestamp**: Tracks when data was last refreshed
+When you're done using the app (to free up your Strava API athlete limit):
+1. Menu (⋯) → "Disconnect"
+2. Your cached data remains until you clear it
+3. You can reconnect anytime to sync new activities
 
-## Project Structure
+## Architecture
+
+### Data Flow
 
 ```
-betaTracker/
-├── Models/
-│   └── StravaActivity.swift          # Data model for Strava activities
-├── Services/
-│   ├── StravaAPIService.swift        # API client with pagination
-│   └── ActivityDataManager.swift     # Caching and data management
-├── Views/
-│   ├── WeeklyDistanceView.swift      # Main weekly summary view
-│   └── TokenInputView.swift          # Token configuration view
-└── betaTrackerApp.swift              # App entry point
+User → Profile Selection → OAuth Authentication → Strava API
+                                                       ↓
+                                              ActivityDataManager
+                                                       ↓
+                                       Disk Cache (UserDefaults per profile)
+                                                       ↓
+                                    In-Memory Performance Caches (rebuilt on launch)
+                                                       ↓
+                                                   Charts & UI
 ```
+
+### Key Components
+
+- **ProfileManager**: Manages user profiles and profile switching
+- **StravaOAuthManager**: Handles OAuth flow, token storage, and automatic refresh
+- **StravaAPIService**: Communicates with Strava REST API (paginated fetching)
+- **ActivityDataManager**: Caches activities and provides data to views
+  - Weekly totals cache (in-memory)
+  - Weekly speed/pace cache (in-memory)
+  - Distance filtering (calculated on-demand)
+- **WeeklyDistanceView**: Main UI with all 4 chart types
+
+### Performance
+
+**Fast:**
+- Activities cached to disk per profile
+- Weekly totals pre-calculated and cached in-memory
+- Speed/pace averages pre-calculated and cached in-memory
+- Chart rendering uses cached data (instant)
+
+**Slower:**
+- Cache building on app launch (noticeable with 1000+ activities)
+- Distance-filtered speed/pace (calculated on-demand, not cached)
+
+## Data Storage
+
+### Cached to Disk (UserDefaults)
+- **Activities**: `cachedStravaActivities_{profileID}`
+- **Cache timestamp**: `activitiesCacheTimestamp_{profileID}`
+- **Profiles**: `userProfiles`
+- **Current profile**: `currentProfileID`
+
+### Secure Storage (Keychain)
+- **Access token**: `stravaAccessToken_{profileID}`
+- **Refresh token**: `stravaRefreshToken_{profileID}`
+- **Token expiry**: `stravaTokenExpiry_{profileID}`
+
+### In-Memory Caches (Rebuilt on Launch)
+- Weekly distance totals by activity type
+- Weekly 1-month moving average speeds by activity type
 
 ## Troubleshooting
 
-### "Unauthorized" Error
-- Check that your access token is valid
-- Go to Strava API settings and verify your token hasn't expired
-- Use the menu to update your token
+### "No activities yet" despite having Strava data
+1. Check connection status: Menu → Connect to Strava
+2. Manually refresh: Menu → Refresh Activities
+3. Verify your Strava API credentials in profile settings
 
-### No Activities Showing
-- Ensure you have cycling activities in your Strava account
-- Try pulling down to refresh
-- Check that activities are of type "Ride", "VirtualRide", or "EBikeRide"
+### "Access token is empty" error
+1. Menu → Reconnect
+2. Re-authorize in your browser
+3. Check Strava API application is active and callback domain is `localhost`
 
-### App Not Loading Data
-- Check your internet connection
-- Verify the token has proper permissions (read activities)
-- Look for error messages in the app
+### Activities not syncing
+1. Verify Strava API application status at https://www.strava.com/settings/api
+2. Check Authorization Callback Domain is set to `localhost`
+3. Try: Menu → Disconnect, then Menu → Connect to Strava
+
+### Slow performance
+- Initial cache building with 1000+ activities may take a few seconds on app launch
+- Once caches are built, chart rendering is instant
+- Distance filtering calculates on-the-fly (may be slower)
+- Consider clearing old data if you have 5000+ activities
+
+### Profile switching not working
+1. Ensure profile has been created with valid API credentials
+2. Each profile needs its own Strava API application
+3. Connect to Strava after switching profiles (if not already connected)
+
+## Privacy & Security
+
+- **Local-first**: All activity data stored locally on your device
+- **No cloud sync**: Data never sent to third-party servers (only Strava)
+- **Secure storage**: OAuth tokens stored in system Keychain
+- **Profile isolation**: Each user's data completely separate
+- **API limits**: Each profile uses its own API application (no athlete limit issues)
+
+## Known Limitations
+
+1. **UserDefaults storage**: May hit size limits with 5000+ activities (consider Core Data migration)
+2. **Cache rebuilding**: Derived caches rebuilt on each app launch (not persisted to disk)
+3. **Main thread caching**: Cache building happens on launch, may cause brief delay
+4. **No background sync**: Must manually refresh to get new activities
+5. **Distance filtering not cached**: Recalculates on every filter change
 
 ## Future Enhancements
 
-Potential features for future development:
-- OAuth authentication flow
-- Monthly/yearly statistics views
-- Activity trend analysis
-- Export data to CSV
-- Dark mode support
-- Achievement badges
-- Comparison with previous periods
+### Performance
+- [ ] Disk caching for derived data (weekly totals, speed caches)
+- [ ] Background thread cache building
+- [ ] Core Data or file-based storage for activities
+- [ ] Lazy/on-demand cache building
+
+### Features
+- [ ] Activity detail view (map, splits, heart rate)
+- [ ] Custom goals and targets
+- [ ] Notifications for milestones
+- [ ] Export data to CSV/GPX
+- [ ] Workout calendar view
+- [ ] Segment analysis
+- [ ] Training load metrics
+
+### User Experience
+- [ ] Onboarding tutorial
+- [ ] Dark mode refinements
+- [ ] Widget support
+- [ ] Apple Watch companion app
+
+## Contributing
+
+This is a personal project built for household use. Feel free to fork and adapt for your own needs.
 
 ## Author
 
@@ -138,4 +289,10 @@ Matthew Phelps (MEWP)
 
 ## License
 
-This is a personal project for individual use.
+[Your chosen license]
+
+## Acknowledgments
+
+- Built with SwiftUI and Swift Charts
+- Powered by the [Strava API](https://developers.strava.com/)
+- OAuth implementation follows Strava's recommended PKCE flow
