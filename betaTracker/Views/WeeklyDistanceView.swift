@@ -18,14 +18,17 @@ struct WeeklyDistanceView: View {
     @State private var showingProfileManagement = false
     @State private var currentWeekStart: Date = Date().startOfWeek()
     @State private var hasAttemptedInitialFetch = false
-    @State private var numberOfWeeks = 10 // Number of weeks to display in chart
+    @State private var numberOfMonths = 6 // Number of months to display in chart
     @State private var rollingDays = 365 // Number of days to show in rolling chart
+    @State private var speedPaceMonths = 3 // Number of months for speed/pace average
     @State private var selectedActivityType: String? = nil // nil means "all activities"
     @State private var selectedChartType: ChartType = .weekly
+    @State private var minDistanceFilter: Double? = nil // Minimum distance filter for speed/pace chart (in km)
 
     // Chart type selection
     enum ChartType: String, CaseIterable, Identifiable {
         case currentWeek = "Current Week"
+        case speedPace = "Speed & Pace"
         case weekly = "Weekly Summary"
         case rolling = "12-Month Rolling"
 
@@ -34,6 +37,7 @@ struct WeeklyDistanceView: View {
         var icon: String {
             switch self {
             case .currentWeek: return "calendar"
+            case .speedPace: return "speedometer"
             case .weekly: return "chart.line.uptrend.xyaxis"
             case .rolling: return "chart.xyaxis.line"
             }
@@ -265,6 +269,8 @@ struct WeeklyDistanceView: View {
                         switch selectedChartType {
                         case .currentWeek:
                             currentWeekStatsCard
+                        case .speedPace:
+                            speedPaceCard
                         case .weekly:
                             weeklyChartCard
                         case .rolling:
@@ -477,6 +483,262 @@ struct WeeklyDistanceView: View {
         .cornerRadius(12)
     }
 
+    // MARK: - Speed & Pace Card
+
+    private var speedPaceCard: some View {
+        VStack(alignment: .leading, spacing: 15) {
+            HStack {
+                Text("1-Month Moving Average")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+
+                Spacer()
+
+                // Distance filter picker
+                let isRunning = selectedActivityType == "Run" || selectedActivityType == "VirtualRun"
+                let isCycling = selectedActivityType == "Ride" || selectedActivityType == "VirtualRide" || selectedActivityType == "EBikeRide"
+
+                Menu {
+                    Button("All Distances") {
+                        minDistanceFilter = nil
+                    }
+
+                    if isRunning {
+                        ForEach([5.0, 10.0, 15.0, 20.0, 30.0], id: \.self) { distance in
+                            Button("\(Int(distance))+ km") {
+                                minDistanceFilter = distance
+                            }
+                        }
+                    } else if isCycling {
+                        ForEach([20.0, 40.0, 60.0, 80.0, 100.0], id: \.self) { distance in
+                            Button("\(Int(distance))+ km") {
+                                minDistanceFilter = distance
+                            }
+                        }
+                    } else {
+                        ForEach([5.0, 10.0, 20.0, 40.0, 60.0], id: \.self) { distance in
+                            Button("\(Int(distance))+ km") {
+                                minDistanceFilter = distance
+                            }
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        if let minDist = minDistanceFilter {
+                            Text("\(Int(minDist))+ km")
+                                .font(.subheadline)
+                        } else {
+                            Text("All")
+                                .font(.subheadline)
+                        }
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                    }
+                    .foregroundColor(.purple)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.purple.opacity(0.1))
+                    .cornerRadius(8)
+                }
+
+                // Month count picker
+                Menu {
+                    ForEach([3, 6, 12, 24], id: \.self) { months in
+                        Button(months == 1 ? "1 month" : "\(months) months") {
+                            speedPaceMonths = months
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(speedPaceMonths == 1 ? "1 month" : "\(speedPaceMonths) months")
+                            .font(.subheadline)
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                    }
+                    .foregroundColor(.green)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.green.opacity(0.1))
+                    .cornerRadius(8)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.top)
+
+            // Determine if we should show speed (km/h) or pace (min/km)
+            let isRunning = selectedActivityType == "Run" || selectedActivityType == "VirtualRun"
+            let isCycling = selectedActivityType == "Ride" || selectedActivityType == "VirtualRide" || selectedActivityType == "EBikeRide"
+
+            if isRunning {
+                // Show pace chart for running
+                let paceData = dataManager.getMovingAveragePace(months: speedPaceMonths, activityType: selectedActivityType, minDistance: minDistanceFilter)
+
+                if paceData.isEmpty {
+                    Text("No pace data available")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(40)
+                } else {
+                    Chart(paceData, id: \.date) { item in
+                        LineMark(
+                            x: .value("Date", item.date, unit: .weekOfYear),
+                            y: .value("Pace", item.pace)
+                        )
+                        .foregroundStyle(.green)
+                        .lineStyle(StrokeStyle(lineWidth: 2.5))
+                    }
+                    .chartXAxis {
+                        AxisMarks(values: .stride(by: .month)) { value in
+                            if let date = value.as(Date.self) {
+                                AxisValueLabel {
+                                    if speedPaceMonths <= 6 {
+                                        Text(date.formatted(.dateTime.month(.abbreviated)))
+                                            .font(.caption)
+                                    } else {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(date.formatted(.dateTime.month(.abbreviated)))
+                                                .font(.caption2)
+                                            Text(date.formatted(.dateTime.year(.twoDigits)))
+                                                .font(.caption)
+                                                .fontWeight(.semibold)
+                                        }
+                                    }
+                                }
+                                AxisGridLine()
+                                AxisTick()
+                            }
+                        }
+                    }
+                    .chartYAxis {
+                        AxisMarks { value in
+                            AxisValueLabel {
+                                if let pace = value.as(Double.self) {
+                                    let minutes = Int(pace)
+                                    let seconds = Int((pace - Double(minutes)) * 60)
+                                    Text("\(minutes):\(String(format: "%02d", seconds))")
+                                }
+                            }
+                            AxisGridLine()
+                        }
+                    }
+                    .frame(height: 350)
+                    .padding()
+                }
+            } else if isCycling {
+                // Show speed chart for cycling
+                let speedData = dataManager.getMovingAverageSpeed(months: speedPaceMonths, activityType: selectedActivityType, minDistance: minDistanceFilter)
+
+                if speedData.isEmpty {
+                    Text("No speed data available")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(40)
+                } else {
+                    Chart(speedData, id: \.date) { item in
+                        LineMark(
+                            x: .value("Date", item.date, unit: .weekOfYear),
+                            y: .value("Speed", item.speed)
+                        )
+                        .foregroundStyle(.green)
+                        .lineStyle(StrokeStyle(lineWidth: 2.5))
+                    }
+                    .chartXAxis {
+                        AxisMarks(values: .stride(by: .month)) { value in
+                            if let date = value.as(Date.self) {
+                                AxisValueLabel {
+                                    if speedPaceMonths <= 6 {
+                                        Text(date.formatted(.dateTime.month(.abbreviated)))
+                                            .font(.caption)
+                                    } else {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(date.formatted(.dateTime.month(.abbreviated)))
+                                                .font(.caption2)
+                                            Text(date.formatted(.dateTime.year(.twoDigits)))
+                                                .font(.caption)
+                                                .fontWeight(.semibold)
+                                        }
+                                    }
+                                }
+                                AxisGridLine()
+                                AxisTick()
+                            }
+                        }
+                    }
+                    .chartYAxis {
+                        AxisMarks { value in
+                            AxisValueLabel {
+                                if let speed = value.as(Double.self) {
+                                    Text("\(Int(speed)) km/h")
+                                }
+                            }
+                            AxisGridLine()
+                        }
+                    }
+                    .frame(height: 350)
+                    .padding()
+                }
+            } else {
+                // For "All" or other activity types, show speed chart
+                let speedData = dataManager.getMovingAverageSpeed(months: speedPaceMonths, activityType: selectedActivityType, minDistance: minDistanceFilter)
+
+                if speedData.isEmpty {
+                    Text("No data available for the selected period")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(40)
+                } else {
+                    Chart(speedData, id: \.date) { item in
+                        LineMark(
+                            x: .value("Date", item.date, unit: .weekOfYear),
+                            y: .value("Speed", item.speed)
+                        )
+                        .foregroundStyle(.green)
+                        .lineStyle(StrokeStyle(lineWidth: 2.5))
+                    }
+                    .chartXAxis {
+                        AxisMarks(values: .stride(by: .month)) { value in
+                            if let date = value.as(Date.self) {
+                                AxisValueLabel {
+                                    if speedPaceMonths <= 6 {
+                                        Text(date.formatted(.dateTime.month(.abbreviated)))
+                                            .font(.caption)
+                                    } else {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(date.formatted(.dateTime.month(.abbreviated)))
+                                                .font(.caption2)
+                                            Text(date.formatted(.dateTime.year(.twoDigits)))
+                                                .font(.caption)
+                                                .fontWeight(.semibold)
+                                        }
+                                    }
+                                }
+                                AxisGridLine()
+                                AxisTick()
+                            }
+                        }
+                    }
+                    .chartYAxis {
+                        AxisMarks { value in
+                            AxisValueLabel {
+                                if let speed = value.as(Double.self) {
+                                    Text("\(Int(speed)) km/h")
+                                }
+                            }
+                            AxisGridLine()
+                        }
+                    }
+                    .frame(height: 350)
+                    .padding()
+                }
+            }
+        }
+        .background(Color.cardBackground)
+        .cornerRadius(12)
+    }
+
     private var weeklyChartCard: some View {
         VStack(alignment: .leading, spacing: 15) {
             HStack {
@@ -486,16 +748,16 @@ struct WeeklyDistanceView: View {
 
                 Spacer()
 
-                // Week count picker
+                // Month count picker
                 Menu {
-                    ForEach([4, 8, 10, 12, 16, 20, 26], id: \.self) { weeks in
-                        Button("\(weeks) weeks") {
-                            numberOfWeeks = weeks
+                    ForEach([1, 2, 6, 12, 24], id: \.self) { months in
+                        Button(months == 1 ? "1 month" : "\(months) months") {
+                            numberOfMonths = months
                         }
                     }
                 } label: {
                     HStack(spacing: 4) {
-                        Text("\(numberOfWeeks) weeks")
+                        Text(numberOfMonths == 1 ? "1 month" : "\(numberOfMonths) months")
                             .font(.subheadline)
                         Image(systemName: "chevron.down")
                             .font(.caption)
@@ -512,15 +774,40 @@ struct WeeklyDistanceView: View {
 
             weeklyChart
                 .chartXAxis {
-                    AxisMarks(values: .stride(by: .weekOfYear)) { value in
+                    // Dynamic labeling based on time window
+                    let xAxisStride: Calendar.Component = {
+                        switch numberOfMonths {
+                        case 1...2: return .weekOfYear // Weekly for 1-2 months
+                        case 3...6: return .month      // Monthly for 3-6 months
+                        default: return .month         // Monthly for longer periods
+                        }
+                    }()
+
+                    AxisMarks(values: .stride(by: xAxisStride)) { value in
                         if let date = value.as(Date.self) {
                             AxisValueLabel {
-                                VStack(alignment: .leading, spacing: 2) {
+                                if numberOfMonths <= 2 {
+                                    // Show week labels for short periods
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(date.formatted(.dateTime.month(.abbreviated)))
+                                            .font(.caption2)
+                                        Text(date.formatted(.dateTime.day()))
+                                            .font(.caption)
+                                            .fontWeight(.semibold)
+                                    }
+                                } else if numberOfMonths <= 12 {
+                                    // Show month for medium periods
                                     Text(date.formatted(.dateTime.month(.abbreviated)))
-                                        .font(.caption2)
-                                    Text(date.formatted(.dateTime.day()))
                                         .font(.caption)
-                                        .fontWeight(.semibold)
+                                } else {
+                                    // Show month + year for long periods
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(date.formatted(.dateTime.month(.abbreviated)))
+                                            .font(.caption2)
+                                        Text(date.formatted(.dateTime.year(.twoDigits)))
+                                            .font(.caption)
+                                            .fontWeight(.semibold)
+                                    }
                                 }
                             }
                             AxisGridLine()
@@ -548,7 +835,9 @@ struct WeeklyDistanceView: View {
     // MARK: - Chart Components
 
     private var weeklyChart: some View {
-        let weeklyData = getWeeklyDistances()
+        // Convert months to approximate weeks (4.33 weeks per month)
+        let numberOfWeeks = Int(Double(numberOfMonths) * 4.33)
+        let weeklyData = getWeeklyDistances(numberOfWeeks: numberOfWeeks)
         let currentYear = Calendar.current.component(.year, from: currentWeek).description
         let previousYear = (Calendar.current.component(.year, from: currentWeek) - 1).description
 
@@ -575,15 +864,15 @@ struct WeeklyDistanceView: View {
             currentYear: StrokeStyle(lineWidth: 3),
             previousYear: StrokeStyle(lineWidth: 2, dash: [5, 3])
         ])
-        .animation(.none, value: numberOfWeeks)
+        .animation(.none, value: numberOfMonths)
     }
 
     private var rollingChartCard: some View {
         let currentPeriodData = dataManager.getRolling12MonthTotals(days: rollingDays, activityType: selectedActivityType, dayOffset: 0)
         let previousPeriodData = dataManager.getRolling12MonthTotals(days: rollingDays, activityType: selectedActivityType, dayOffset: -rollingDays)
 
-        // Define colors for the chart
-        let currentPeriodColor: Color = .purple
+        // Define colors for the chart (matching weekly summary)
+        let currentPeriodColor: Color = .blue
         let previousPeriodColor: Color = .orange
 
         // Transform to relative days with original dates preserved for current period
@@ -740,7 +1029,7 @@ struct WeeklyDistanceView: View {
     // MARK: - Weekly Data Calculation
 
     /// Get weekly distance totals for the specified number of weeks, including previous year
-    private func getWeeklyDistances() -> [(weekStart: Date, distance: Double, year: String)] {
+    private func getWeeklyDistances(numberOfWeeks: Int) -> [(weekStart: Date, distance: Double, year: String)] {
         // Pre-allocate array for better performance
         var weeklyData: [(weekStart: Date, distance: Double, year: String)] = []
         weeklyData.reserveCapacity(numberOfWeeks * 2) // Current + previous year

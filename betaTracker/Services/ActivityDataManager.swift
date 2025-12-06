@@ -35,10 +35,14 @@ class ActivityDataManager: ObservableObject {
     // Cached weekly totals for performance, keyed by activity type
     private var weeklyTotalsCache: [String: [Date: Double]] = [:]
 
+    // Cached weekly speed/pace for performance, keyed by activity type
+    private var weeklySpeedCache: [String: [Date: Double]] = [:]
+
     init() {
         loadCachedActivities()
         updateAvailableActivityTypes()
         buildWeeklyTotalsCache()
+        buildWeeklySpeedCache()
     }
 
     /// Reload data for the current profile (call when switching profiles)
@@ -46,6 +50,7 @@ class ActivityDataManager: ObservableObject {
         loadCachedActivities()
         updateAvailableActivityTypes()
         buildWeeklyTotalsCache()
+        buildWeeklySpeedCache()
         print("DEBUG: Reloaded data for current profile - \(activities.count) activities")
     }
 
@@ -83,6 +88,9 @@ class ActivityDataManager: ObservableObject {
 
             // Rebuild weekly totals cache
             buildWeeklyTotalsCache()
+
+            // Rebuild weekly speed cache
+            buildWeeklySpeedCache()
 
             // Update profile's last synced timestamp
             ProfileManager.shared.updateLastSyncedTimestamp()
@@ -210,6 +218,7 @@ class ActivityDataManager: ObservableObject {
         activities = []
         availableActivityTypes = []
         weeklyTotalsCache.removeAll()
+        weeklySpeedCache.removeAll()
         print("DEBUG: Cleared cache for current user")
     }
 
@@ -220,6 +229,42 @@ class ActivityDataManager: ObservableObject {
         let types = Set(activities.map { $0.type })
         availableActivityTypes = Array(types).sorted()
         print("DEBUG: Found \(availableActivityTypes.count) activity types: \(availableActivityTypes)")
+    }
+
+    /// Calculate average speed (km/h) for activities in the last X months
+    func getAverageSpeed(months: Int, activityType: String? = nil) -> Double? {
+        let calendar = Calendar.current
+        guard let startDate = calendar.date(byAdding: .month, value: -months, to: Date()) else {
+            return nil
+        }
+
+        // Filter activities from last X months
+        var recentActivities = activities.filter { $0.localDate >= startDate }
+
+        // Filter by activity type if specified
+        if let activityType = activityType {
+            recentActivities = recentActivities.filter { $0.type == activityType }
+        }
+
+        guard !recentActivities.isEmpty else { return nil }
+
+        // Calculate average speed: total distance / total time (in hours)
+        let totalDistance = recentActivities.reduce(0.0) { $0 + $1.distanceKm }
+        let totalTimeHours = recentActivities.reduce(0.0) { $0 + Double($1.movingTime ?? 0) / 3600.0 }
+
+        guard totalTimeHours > 0 else { return nil }
+
+        return totalDistance / totalTimeHours
+    }
+
+    /// Calculate average pace (min/km) for activities in the last X months
+    func getAveragePace(months: Int, activityType: String? = nil) -> Double? {
+        guard let avgSpeed = getAverageSpeed(months: months, activityType: activityType), avgSpeed > 0 else {
+            return nil
+        }
+
+        // Convert km/h to min/km: 60 / speed
+        return 60.0 / avgSpeed
     }
 
     /// Get the most active activity type in the last 6 months
@@ -246,6 +291,91 @@ class ActivityDataManager: ObservableObject {
         print("DEBUG: Most active type in last 6 months: \(mostActiveType ?? "none") with \(typeCounts[mostActiveType ?? ""] ?? 0) activities")
 
         return mostActiveType
+    }
+
+    /// Calculate 1-month moving average of speed at weekly level (cached or calculated with distance filter)
+    /// - Parameters:
+    ///   - months: Number of months to show in the chart
+    ///   - activityType: Optional activity type filter
+    ///   - minDistance: Optional minimum distance filter (in km)
+    /// - Returns: Array of (date, speed) tuples representing the moving average
+    func getMovingAverageSpeed(months: Int, activityType: String? = nil, minDistance: Double? = nil) -> [(date: Date, speed: Double)] {
+        let calendar = Calendar.current
+        guard let startDate = calendar.date(byAdding: .month, value: -months, to: Date()) else {
+            return []
+        }
+
+        // If no distance filter, use cached data
+        if minDistance == nil {
+            let cacheKey = activityType ?? "all"
+            if let cachedData = weeklySpeedCache[cacheKey], !cachedData.isEmpty {
+                // Filter cached data to requested time range
+                return cachedData
+                    .filter { $0.key >= startDate }
+                    .map { (date: $0.key, speed: $0.value) }
+                    .sorted { $0.date < $1.date }
+            }
+        }
+
+        // If distance filter is specified, calculate on-the-fly
+        if let minDistance = minDistance {
+            // Filter activities by type and distance
+            var filteredActivities = activities.filter { activity in
+                let typeMatch = activityType == nil || activity.type == activityType
+                let distanceMatch = activity.distanceKm >= minDistance
+                return typeMatch && distanceMatch && activity.localDate >= startDate
+            }
+            filteredActivities.sort { $0.localDate < $1.localDate }
+
+            guard !filteredActivities.isEmpty else { return [] }
+
+            // Get all unique week starts
+            let weekStarts = Set(filteredActivities.map { $0.localDate.startOfWeek() }).sorted()
+
+            var result: [(date: Date, speed: Double)] = []
+
+            for weekStart in weekStarts {
+                // Get date 1 month ago
+                guard let oneMonthAgo = calendar.date(byAdding: .month, value: -1, to: weekStart) else {
+                    continue
+                }
+
+                // Get activities in the 1-month window ending on this week
+                let windowActivities = filteredActivities.filter { activity in
+                    activity.localDate >= oneMonthAgo && activity.localDate <= weekStart
+                }
+
+                // Calculate average speed for this window
+                if !windowActivities.isEmpty {
+                    let totalDistance = windowActivities.reduce(0.0) { $0 + $1.distanceKm }
+                    let totalTimeHours = windowActivities.reduce(0.0) { $0 + Double($1.movingTime ?? 0) / 3600.0 }
+
+                    if totalTimeHours > 0 {
+                        let avgSpeed = totalDistance / totalTimeHours
+                        result.append((date: weekStart, speed: avgSpeed))
+                    }
+                }
+            }
+
+            return result
+        }
+
+        return []
+    }
+
+    /// Calculate 1-month moving average of pace at weekly level (cached or calculated with distance filter)
+    /// - Parameters:
+    ///   - months: Number of months to show in the chart
+    ///   - activityType: Optional activity type filter
+    ///   - minDistance: Optional minimum distance filter (in km)
+    /// - Returns: Array of (date, pace) tuples representing the moving average
+    func getMovingAveragePace(months: Int, activityType: String? = nil, minDistance: Double? = nil) -> [(date: Date, pace: Double)] {
+        let speedData = getMovingAverageSpeed(months: months, activityType: activityType, minDistance: minDistance)
+        return speedData.compactMap { item in
+            guard item.speed > 0 else { return nil }
+            let pace = 60.0 / item.speed
+            return (date: item.date, pace: pace)
+        }
     }
 
     /// Build cache of weekly totals for fast lookups
@@ -284,6 +414,77 @@ class ActivityDataManager: ObservableObject {
         }
 
         print("DEBUG: Built weekly cache for \(weeklyTotalsCache.keys.count) activity types")
+    }
+
+    /// Build cache of weekly speed averages with 1-month moving window for fast lookups
+    private func buildWeeklySpeedCache() {
+        weeklySpeedCache.removeAll()
+
+        guard !activities.isEmpty else { return }
+
+        let calendar = Calendar.current
+
+        // Get all unique week starts from activities
+        let allWeekStarts = Set(activities.map { $0.localDate.startOfWeek() }).sorted()
+
+        // Build cache for "all" activities
+        weeklySpeedCache["all"] = [:]
+        for weekStart in allWeekStarts {
+            // Get date 1 month ago
+            guard let oneMonthAgo = calendar.date(byAdding: .month, value: -1, to: weekStart) else {
+                continue
+            }
+
+            // Get activities in the 1-month window ending on this week
+            let windowActivities = activities.filter { activity in
+                activity.localDate >= oneMonthAgo && activity.localDate <= weekStart
+            }
+
+            // Calculate average speed for this window
+            if !windowActivities.isEmpty {
+                let totalDistance = windowActivities.reduce(0.0) { $0 + $1.distanceKm }
+                let totalTimeHours = windowActivities.reduce(0.0) { $0 + Double($1.movingTime ?? 0) / 3600.0 }
+
+                if totalTimeHours > 0 {
+                    let avgSpeed = totalDistance / totalTimeHours
+                    weeklySpeedCache["all"]?[weekStart] = avgSpeed
+                }
+            }
+        }
+
+        // Build cache for each activity type
+        for activityType in availableActivityTypes {
+            let typeActivities = activities.filter { $0.type == activityType }
+            guard !typeActivities.isEmpty else { continue }
+
+            let typeWeekStarts = Set(typeActivities.map { $0.localDate.startOfWeek() }).sorted()
+
+            weeklySpeedCache[activityType] = [:]
+            for weekStart in typeWeekStarts {
+                // Get date 1 month ago
+                guard let oneMonthAgo = calendar.date(byAdding: .month, value: -1, to: weekStart) else {
+                    continue
+                }
+
+                // Get activities in the 1-month window ending on this week
+                let windowActivities = typeActivities.filter { activity in
+                    activity.localDate >= oneMonthAgo && activity.localDate <= weekStart
+                }
+
+                // Calculate average speed for this window
+                if !windowActivities.isEmpty {
+                    let totalDistance = windowActivities.reduce(0.0) { $0 + $1.distanceKm }
+                    let totalTimeHours = windowActivities.reduce(0.0) { $0 + Double($1.movingTime ?? 0) / 3600.0 }
+
+                    if totalTimeHours > 0 {
+                        let avgSpeed = totalDistance / totalTimeHours
+                        weeklySpeedCache[activityType]?[weekStart] = avgSpeed
+                    }
+                }
+            }
+        }
+
+        print("DEBUG: Built weekly speed cache for \(weeklySpeedCache.keys.count) activity types")
     }
 
     // MARK: - Daily and Rolling Calculations
