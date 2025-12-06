@@ -222,6 +222,32 @@ class ActivityDataManager: ObservableObject {
         print("DEBUG: Found \(availableActivityTypes.count) activity types: \(availableActivityTypes)")
     }
 
+    /// Get the most active activity type in the last 6 months
+    func getMostActiveTypeInLast6Months() -> String? {
+        let calendar = Calendar.current
+        guard let sixMonthsAgo = calendar.date(byAdding: .month, value: -6, to: Date()) else {
+            return nil
+        }
+
+        // Filter activities from last 6 months
+        let recentActivities = activities.filter { $0.localDate >= sixMonthsAgo }
+
+        guard !recentActivities.isEmpty else { return nil }
+
+        // Count activities by type
+        var typeCounts: [String: Int] = [:]
+        for activity in recentActivities {
+            typeCounts[activity.type, default: 0] += 1
+        }
+
+        // Find the type with most activities
+        let mostActiveType = typeCounts.max(by: { $0.value < $1.value })?.key
+
+        print("DEBUG: Most active type in last 6 months: \(mostActiveType ?? "none") with \(typeCounts[mostActiveType ?? ""] ?? 0) activities")
+
+        return mostActiveType
+    }
+
     /// Build cache of weekly totals for fast lookups
     private func buildWeeklyTotalsCache() {
         weeklyTotalsCache.removeAll()

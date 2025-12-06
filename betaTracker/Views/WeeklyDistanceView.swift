@@ -21,243 +21,358 @@ struct WeeklyDistanceView: View {
     @State private var numberOfWeeks = 10 // Number of weeks to display in chart
     @State private var rollingDays = 365 // Number of days to show in rolling chart
     @State private var selectedActivityType: String? = nil // nil means "all activities"
+    @State private var selectedChartType: ChartType = .weekly
+
+    // Chart type selection
+    enum ChartType: String, CaseIterable, Identifiable {
+        case weekly = "Weekly Summary"
+        case rolling = "12-Month Rolling"
+
+        var id: String { rawValue }
+
+        var icon: String {
+            switch self {
+            case .weekly: return "chart.line.uptrend.xyaxis"
+            case .rolling: return "chart.xyaxis.line"
+            }
+        }
+    }
 
     // Cache current week to avoid recalculation
     private let currentWeek = Date().startOfWeek()
 
     var body: some View {
-        NavigationView {
-            Group {
-                if profileManager.currentProfile == nil {
-                    // No profile selected - prompt to create one
-                    VStack(spacing: 20) {
-                        Image(systemName: "person.3")
-                            .font(.system(size: 60))
-                            .foregroundColor(.blue)
-                        Text("Welcome to Strava Tracker")
-                            .font(.title)
-                            .fontWeight(.bold)
-                        Text("Create a profile to get started")
-                            .font(.body)
-                            .foregroundColor(.secondary)
-                        Button(action: {
-                            showingProfileManagement = true
-                        }) {
-                            Label("Create Profile", systemImage: "plus.circle.fill")
-                                .font(.headline)
-                                .foregroundColor(.white)
-                                .padding()
-                                .background(Color.blue)
-                                .cornerRadius(10)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
-                    .padding()
-                } else if dataManager.isLoading {
-                    VStack {
-                        ProgressView("Loading activities...")
+        Group {
+            if profileManager.currentProfile == nil {
+                // No profile selected - prompt to create one
+                VStack(spacing: 20) {
+                    Image(systemName: "person.3")
+                        .font(.system(size: 60))
+                        .foregroundColor(.blue)
+                    Text("Welcome to Strava Tracker")
+                        .font(.title)
+                        .fontWeight(.bold)
+                    Text("Create a profile to get started")
+                        .font(.body)
+                        .foregroundColor(.secondary)
+                    Button(action: {
+                        showingProfileManagement = true
+                    }) {
+                        Label("Create Profile", systemImage: "plus.circle.fill")
+                            .font(.headline)
+                            .foregroundColor(.white)
                             .padding()
-                        Text("This may take a moment for large activity histories")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                            .background(Color.blue)
+                            .cornerRadius(10)
                     }
-                } else if let errorMessage = dataManager.errorMessage {
-                    VStack(spacing: 20) {
-                        Image(systemName: "exclamationmark.triangle")
-                            .font(.system(size: 50))
-                            .foregroundColor(.red)
-                        Text("Error")
-                            .font(.title)
-                            .fontWeight(.bold)
-                        Text(errorMessage)
-                            .multilineTextAlignment(.center)
-                            .foregroundColor(.secondary)
-                        Button("Retry") {
-                            Task {
-                                await dataManager.fetchActivities(accessToken: accessToken)
-                            }
-                        }
-                        .buttonStyle(BorderedProminentButtonStyle())
-                    }
-                    .padding()
-                } else if dataManager.activities.isEmpty {
-                    VStack(spacing: 20) {
-                        Image(systemName: "bicycle")
-                            .font(.system(size: 50))
-                            .foregroundColor(.blue)
-                        Text("No activities yet")
-                            .font(.title)
-                            .fontWeight(.bold)
-                        Text("Pull to refresh or tap the refresh button to load your Strava activities")
-                            .multilineTextAlignment(.center)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding()
-                } else {
-                    weeklyStatsView
+                    .buttonStyle(PlainButtonStyle())
                 }
-            }
-            .navigationTitle("Strava Tracker")
-            .toolbar {
-                toolbarMenu
-            }
-            .sheet(isPresented: $showingTokenInput) {
-                TokenInputView(accessToken: $accessToken)
-            }
-            .sheet(isPresented: $showingProfileManagement) {
-                ProfileManagementView()
-            }
-            .onAppear {
-                // Check OAuth authentication status
-                oauthManager.checkAuthenticationStatus()
+                .padding()
+            } else if dataManager.isLoading {
+                VStack {
+                    ProgressView("Loading activities...")
+                        .padding()
+                    Text("This may take a moment for large activity histories")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            } else if let errorMessage = dataManager.errorMessage {
+                VStack(spacing: 20) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.system(size: 50))
+                        .foregroundColor(.red)
+                    Text("Error")
+                        .font(.title)
+                        .fontWeight(.bold)
+                    Text(errorMessage)
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(.secondary)
+                    Button("Retry") {
+                        Task {
+                            await dataManager.fetchActivities(accessToken: accessToken)
+                        }
+                    }
+                    .buttonStyle(BorderedProminentButtonStyle())
+                }
+                .padding()
+            } else if dataManager.activities.isEmpty {
+                VStack(spacing: 20) {
+                    Image(systemName: "bicycle")
+                        .font(.system(size: 50))
+                        .foregroundColor(.blue)
+                    Text("No activities yet")
+                        .font(.title)
+                        .fontWeight(.bold)
+                    Text("Pull to refresh or tap the refresh button to load your Strava activities")
+                        .multilineTextAlignment(.center)
+                        .foregroundColor(.secondary)
+                }
+                .padding()
+            } else {
+                HStack(spacing: 0) {
+                    // Sidebar with controls
+                    controlsSidebar
+                        .frame(width: 300)
+                        .background(Color.cardBackground)
 
-                // Only attempt initial fetch once
-                guard !hasAttemptedInitialFetch else { return }
-                hasAttemptedInitialFetch = true
+                    Divider()
 
-                if !oauthManager.isAuthenticated {
-                    showingTokenInput = true
-                } else if dataManager.activities.isEmpty {
-                    Task {
-                        if let token = try? await oauthManager.getValidAccessToken() {
-                            accessToken = token
-                            await dataManager.fetchActivities(accessToken: token)
-                        }
+                    // Main content area
+                    mainContentArea
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .toolbar {
+            toolbarMenu
+        }
+        .sheet(isPresented: $showingTokenInput) {
+            TokenInputView(accessToken: $accessToken)
+        }
+        .sheet(isPresented: $showingProfileManagement) {
+            ProfileManagementView()
+        }
+        .onAppear {
+            // Check OAuth authentication status
+            oauthManager.checkAuthenticationStatus()
+
+            // Set default activity type if we have cached data
+            if !dataManager.activities.isEmpty && selectedActivityType == nil {
+                selectedActivityType = dataManager.getMostActiveTypeInLast6Months()
+            }
+
+            // Only attempt initial fetch once
+            guard !hasAttemptedInitialFetch else { return }
+            hasAttemptedInitialFetch = true
+
+            if !oauthManager.isAuthenticated {
+                showingTokenInput = true
+            } else if dataManager.activities.isEmpty {
+                Task {
+                    if let token = try? await oauthManager.getValidAccessToken() {
+                        accessToken = token
+                        await dataManager.fetchActivities(accessToken: token)
                     }
                 }
             }
-            .onChange(of: oauthManager.isAuthenticated) { isAuthenticated in
-                if isAuthenticated, dataManager.activities.isEmpty {
-                    Task {
-                        if let token = try? await oauthManager.getValidAccessToken() {
-                            accessToken = token
-                            await dataManager.fetchActivities(accessToken: token)
-                        }
+        }
+        .onChange(of: oauthManager.isAuthenticated) { isAuthenticated in
+            if isAuthenticated, dataManager.activities.isEmpty {
+                Task {
+                    if let token = try? await oauthManager.getValidAccessToken() {
+                        accessToken = token
+                        await dataManager.fetchActivities(accessToken: token)
                     }
                 }
             }
-            .onChange(of: profileManager.currentProfile?.id) { _ in
-                // Reload data when profile changes
-                dataManager.reloadForCurrentProfile()
-                oauthManager.checkAuthenticationStatus()
+        }
+        .onChange(of: profileManager.currentProfile?.id) { _ in
+            // Reload data when profile changes
+            dataManager.reloadForCurrentProfile()
+            oauthManager.checkAuthenticationStatus()
+            // Set default activity type to most active in last 6 months
+            selectedActivityType = dataManager.getMostActiveTypeInLast6Months()
+        }
+        .onChange(of: dataManager.activities.count) { count in
+            // Update default activity type when activities change
+            if count > 0 && selectedActivityType == nil {
+                // Use a small delay to ensure data is fully processed
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    selectedActivityType = dataManager.getMostActiveTypeInLast6Months()
+                }
             }
         }
     }
 
-    private var weeklyStatsView: some View {
-        ScrollView {
-            VStack(spacing: 25) {
-                // Profile selector
-                ProfileSelectorView(showingProfileManagement: $showingProfileManagement)
+    // MARK: - Sidebar Controls
 
-                // Week navigation
-                weekNavigationView
+    private var controlsSidebar: some View {
+        ScrollView {
+            VStack(spacing: 20) {
+                // Profile selector
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Profile")
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+
+                    ProfileSelectorView(showingProfileManagement: $showingProfileManagement)
+                }
+
+                Divider()
+
+                // Date navigation (only show for weekly view)
+                if selectedChartType == .weekly {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Date Range")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+
+                        weekNavigationView
+                    }
+
+                    Divider()
+                }
 
                 // Activity type selector
                 if !dataManager.availableActivityTypes.isEmpty {
-                    activityTypeSelector
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Activity Type")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+
+                        activityTypeSelector
+                    }
+
+                    Divider()
                 }
 
-                // Total distance display
-                totalDistanceCard
-
-                // Number of rides
-                rideCountCard
-
-                // Weekly distances chart
-                dailyDistanceChart
-
-                // Rolling 12-month chart
-                rolling12MonthChart
-
-                // Last updated timestamp
+                // Last sync info
                 if let lastUpdate = dataManager.lastCacheDate() {
-                    Text("Last updated: \(lastUpdate.formatted(date: .abbreviated, time: .shortened))")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding(.top, 10)
+                    VStack(alignment: .leading, spacing: 5) {
+                        Text("Last Synced")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                        Text(lastUpdate.formatted(date: .abbreviated, time: .shortened))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
 
-                Spacer(minLength: 20)
+                Spacer()
             }
             .padding()
+        }
+    }
+
+    // MARK: - Main Content Area
+
+    private var mainContentArea: some View {
+        VStack(spacing: 0) {
+            // Chart type selector
+            chartTypeSelector
+                .padding()
+                .background(Color.cardBackground)
+
+            Divider()
+
+            // Chart content
+            ScrollView {
+                VStack(spacing: 25) {
+                    // Stats cards
+                    HStack(spacing: 20) {
+                        totalDistanceCard
+                        rideCountCard
+                    }
+                    .padding(.horizontal)
+
+                    // Selected chart
+                    Group {
+                        switch selectedChartType {
+                        case .weekly:
+                            weeklyChartCard
+                        case .rolling:
+                            rollingChartCard
+                        }
+                    }
+                    .padding(.horizontal)
+
+                    Spacer(minLength: 20)
+                }
+                .padding(.vertical)
+            }
+        }
+    }
+
+    private var chartTypeSelector: some View {
+        HStack(spacing: 15) {
+            ForEach(ChartType.allCases) { chartType in
+                Button(action: {
+                    selectedChartType = chartType
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: chartType.icon)
+                        Text(chartType.rawValue)
+                            .font(.subheadline)
+                    }
+                    .foregroundColor(selectedChartType == chartType ? .white : .blue)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                    .background(selectedChartType == chartType ? Color.blue : Color.blue.opacity(0.1))
+                    .cornerRadius(8)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
         }
     }
 
     private var weekNavigationView: some View {
         VStack(spacing: 10) {
             Text(weekDateRange)
-                .font(.headline)
-                .foregroundColor(.secondary)
+                .font(.subheadline)
+                .foregroundColor(.primary)
 
-            HStack(spacing: 20) {
+            HStack(spacing: 10) {
                 Button(action: previousWeek) {
-                    Label("Previous", systemImage: "chevron.left")
+                    Image(systemName: "chevron.left")
                 }
                 .buttonStyle(BorderedButtonStyle())
                 .disabled(!canGoToPreviousWeek())
 
+                Button(action: goToCurrentWeek) {
+                    Text("Today")
+                        .font(.caption)
+                }
+                .buttonStyle(BorderedProminentButtonStyle())
+
                 Button(action: nextWeek) {
-                    Label("Next", systemImage: "chevron.right")
+                    Image(systemName: "chevron.right")
                 }
                 .buttonStyle(BorderedButtonStyle())
                 .disabled(!canGoToNextWeek())
-
-                Button(action: goToCurrentWeek) {
-                    Text("Today")
-                }
-                .buttonStyle(BorderedProminentButtonStyle())
             }
         }
-        .padding()
-        .background(Color.cardBackground)
-        .cornerRadius(12)
     }
 
     private var activityTypeSelector: some View {
-        VStack(spacing: 12) {
-            Text("Activity Type")
-                .font(.headline)
-                .foregroundColor(.secondary)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
-                    // "All" button
-                    Button(action: {
-                        selectedActivityType = nil
-                    }) {
-                        Text("All")
-                            .font(.subheadline)
-                            .fontWeight(selectedActivityType == nil ? .semibold : .regular)
-                            .foregroundColor(selectedActivityType == nil ? .white : .blue)
-                            .padding(.horizontal, 16)
-                            .padding(.vertical, 8)
-                            .background(selectedActivityType == nil ? Color.blue : Color.blue.opacity(0.1))
-                            .cornerRadius(20)
-                    }
-
-                    // Individual activity type buttons
-                    ForEach(dataManager.availableActivityTypes, id: \.self) { activityType in
-                        Button(action: {
-                            selectedActivityType = activityType
-                        }) {
-                            Text(activityType)
-                                .font(.subheadline)
-                                .fontWeight(selectedActivityType == activityType ? .semibold : .regular)
-                                .foregroundColor(selectedActivityType == activityType ? .white : .blue)
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 8)
-                                .background(selectedActivityType == activityType ? Color.blue : Color.blue.opacity(0.1))
-                                .cornerRadius(20)
-                        }
+        VStack(spacing: 8) {
+            // "All" button
+            Button(action: {
+                selectedActivityType = nil
+            }) {
+                HStack {
+                    Text("All")
+                    Spacer()
+                    if selectedActivityType == nil {
+                        Image(systemName: "checkmark")
                     }
                 }
-                .padding(.horizontal)
+                .padding(.vertical, 8)
+                .padding(.horizontal, 12)
+                .background(selectedActivityType == nil ? Color.blue.opacity(0.1) : Color.clear)
+                .cornerRadius(6)
+            }
+            .buttonStyle(PlainButtonStyle())
+
+            // Individual activity type buttons
+            ForEach(dataManager.availableActivityTypes, id: \.self) { activityType in
+                Button(action: {
+                    selectedActivityType = activityType
+                }) {
+                    HStack {
+                        Text(activityType)
+                        Spacer()
+                        if selectedActivityType == activityType {
+                            Image(systemName: "checkmark")
+                        }
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 12)
+                    .background(selectedActivityType == activityType ? Color.blue.opacity(0.1) : Color.clear)
+                    .cornerRadius(6)
+                }
+                .buttonStyle(PlainButtonStyle())
             }
         }
-        .padding(.vertical)
-        .background(Color.cardBackground)
-        .cornerRadius(12)
     }
 
     private var totalDistanceCard: some View {
@@ -302,11 +417,12 @@ struct WeeklyDistanceView: View {
         .cornerRadius(12)
     }
 
-    private var dailyDistanceChart: some View {
+    private var weeklyChartCard: some View {
         VStack(alignment: .leading, spacing: 15) {
             HStack {
                 Text("Weekly Distances")
-                    .font(.headline)
+                    .font(.title2)
+                    .fontWeight(.semibold)
 
                 Spacer()
 
@@ -332,38 +448,38 @@ struct WeeklyDistanceView: View {
                 }
             }
             .padding(.horizontal)
+            .padding(.top)
 
             weeklyChart
-
-            .chartXAxis {
-                AxisMarks(values: .stride(by: .weekOfYear)) { value in
-                    if let date = value.as(Date.self) {
+                .chartXAxis {
+                    AxisMarks(values: .stride(by: .weekOfYear)) { value in
+                        if let date = value.as(Date.self) {
+                            AxisValueLabel {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(date.formatted(.dateTime.month(.abbreviated)))
+                                        .font(.caption2)
+                                    Text(date.formatted(.dateTime.day()))
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                }
+                            }
+                            AxisGridLine()
+                            AxisTick()
+                        }
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks { value in
                         AxisValueLabel {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(date.formatted(.dateTime.month(.abbreviated)))
-                                    .font(.caption2)
-                                Text(date.formatted(.dateTime.day()))
-                                    .font(.caption)
-                                    .fontWeight(.semibold)
+                            if let distance = value.as(Double.self) {
+                                Text("\(Int(distance)) km")
                             }
                         }
                         AxisGridLine()
-                        AxisTick()
                     }
                 }
-            }
-            .chartYAxis {
-                AxisMarks { value in
-                    AxisValueLabel {
-                        if let distance = value.as(Double.self) {
-                            Text("\(Int(distance)) km")
-                        }
-                    }
-                    AxisGridLine()
-                }
-            }
-            .frame(height: 280)
-            .padding()
+                .frame(height: 350)
+                .padding()
         }
         .background(Color.cardBackground)
         .cornerRadius(12)
@@ -402,13 +518,14 @@ struct WeeklyDistanceView: View {
         .animation(.none, value: numberOfWeeks)
     }
 
-    private var rolling12MonthChart: some View {
+    private var rollingChartCard: some View {
         let rollingData = dataManager.getRolling12MonthTotals(days: rollingDays, activityType: selectedActivityType)
 
         return VStack(alignment: .leading, spacing: 15) {
             HStack {
                 Text("12-Month Rolling Total")
-                    .font(.headline)
+                    .font(.title2)
+                    .fontWeight(.semibold)
 
                 Spacer()
 
@@ -434,13 +551,14 @@ struct WeeklyDistanceView: View {
                 }
             }
             .padding(.horizontal)
+            .padding(.top)
 
             if rollingData.isEmpty {
                 Text("Not enough data for rolling calculation")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
-                    .padding()
+                    .padding(40)
             } else {
                 Chart(rollingData, id: \.date) { item in
                     LineMark(
@@ -471,7 +589,7 @@ struct WeeklyDistanceView: View {
                         AxisGridLine()
                     }
                 }
-                .frame(height: 250)
+                .frame(height: 350)
                 .padding()
                 .animation(.none, value: rollingDays)
             }
