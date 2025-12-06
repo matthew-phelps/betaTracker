@@ -1,0 +1,371 @@
+//
+//  WeeklyDistanceView.swift
+//  betaTracker
+//
+//  Created by MEWP (Matthew Phelps) on 06/12/2025.
+//
+
+import SwiftUI
+import Charts
+
+/// Main view showing weekly cycling distance and statistics
+struct WeeklyDistanceView: View {
+    @StateObject private var dataManager = ActivityDataManager()
+    @StateObject private var oauthManager = StravaOAuthManager.shared
+    @State private var accessToken: String = ""
+    @State private var showingTokenInput = false
+    @State private var currentWeekStart: Date = Date().startOfWeek()
+    @State private var hasAttemptedInitialFetch = false
+
+    var body: some View {
+        NavigationView {
+            Group {
+                if dataManager.isLoading {
+                    VStack {
+                        ProgressView("Loading activities...")
+                            .padding()
+                        Text("This may take a moment for large activity histories")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                } else if let errorMessage = dataManager.errorMessage {
+                    VStack(spacing: 20) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.system(size: 50))
+                            .foregroundColor(.red)
+                        Text("Error")
+                            .font(.title)
+                            .fontWeight(.bold)
+                        Text(errorMessage)
+                            .multilineTextAlignment(.center)
+                            .foregroundColor(.secondary)
+                        Button("Retry") {
+                            Task {
+                                await dataManager.fetchActivities(accessToken: accessToken)
+                            }
+                        }
+                        .buttonStyle(BorderedProminentButtonStyle())
+                    }
+                    .padding()
+                } else if dataManager.activities.isEmpty {
+                    VStack(spacing: 20) {
+                        Image(systemName: "bicycle")
+                            .font(.system(size: 50))
+                            .foregroundColor(.blue)
+                        Text("No activities yet")
+                            .font(.title)
+                            .fontWeight(.bold)
+                        Text("Pull to refresh or tap the refresh button to load your Strava activities")
+                            .multilineTextAlignment(.center)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding()
+                } else {
+                    weeklyStatsView
+                }
+            }
+            .navigationTitle("Strava Tracker")
+            .toolbar {
+                toolbarMenu
+            }
+            .sheet(isPresented: $showingTokenInput) {
+                TokenInputView(accessToken: $accessToken)
+            }
+            .onAppear {
+                // Check OAuth authentication status
+                oauthManager.checkAuthenticationStatus()
+
+                // Only attempt initial fetch once
+                guard !hasAttemptedInitialFetch else { return }
+                hasAttemptedInitialFetch = true
+
+                if !oauthManager.isAuthenticated {
+                    showingTokenInput = true
+                } else if dataManager.activities.isEmpty {
+                    Task {
+                        if let token = try? await oauthManager.getValidAccessToken() {
+                            accessToken = token
+                            await dataManager.fetchActivities(accessToken: token)
+                        }
+                    }
+                }
+            }
+            .onChange(of: oauthManager.isAuthenticated) { isAuthenticated in
+                if isAuthenticated, dataManager.activities.isEmpty {
+                    Task {
+                        if let token = try? await oauthManager.getValidAccessToken() {
+                            accessToken = token
+                            await dataManager.fetchActivities(accessToken: token)
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private var weeklyStatsView: some View {
+        ScrollView {
+            VStack(spacing: 25) {
+                // Week navigation
+                weekNavigationView
+
+                // Total distance display
+                totalDistanceCard
+
+                // Number of rides
+                rideCountCard
+
+                // Daily distances chart
+                dailyDistanceChart
+
+                // Last updated timestamp
+                if let lastUpdate = dataManager.lastCacheDate() {
+                    Text("Last updated: \(lastUpdate.formatted(date: .abbreviated, time: .shortened))")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.top, 10)
+                }
+
+                Spacer(minLength: 20)
+            }
+            .padding()
+        }
+    }
+
+    private var weekNavigationView: some View {
+        VStack(spacing: 10) {
+            Text(weekDateRange)
+                .font(.headline)
+                .foregroundColor(.secondary)
+
+            HStack(spacing: 20) {
+                Button(action: previousWeek) {
+                    Label("Previous", systemImage: "chevron.left")
+                }
+                .buttonStyle(BorderedButtonStyle())
+                .disabled(!canGoToPreviousWeek())
+
+                Button(action: nextWeek) {
+                    Label("Next", systemImage: "chevron.right")
+                }
+                .buttonStyle(BorderedButtonStyle())
+                .disabled(!canGoToNextWeek())
+
+                Button(action: goToCurrentWeek) {
+                    Text("Today")
+                }
+                .buttonStyle(BorderedProminentButtonStyle())
+            }
+        }
+        .padding()
+        .background(Color.cardBackground)
+        .cornerRadius(12)
+    }
+
+    private var totalDistanceCard: some View {
+        VStack(spacing: 10) {
+            Text("Total Distance")
+                .font(.headline)
+                .foregroundColor(.secondary)
+
+            let totalDistance = dataManager.totalDistanceForWeek(startDate: currentWeekStart)
+            Text(String(format: "%.1f km", totalDistance))
+                .font(.system(size: 60, weight: .bold, design: .rounded))
+                .foregroundColor(.blue)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 30)
+        .background(Color.cardBackground)
+        .cornerRadius(12)
+    }
+
+    private var rideCountCard: some View {
+        let rideCount = dataManager.activitiesForWeek(startDate: currentWeekStart).count
+
+        return HStack(spacing: 15) {
+            Image(systemName: "bicycle.circle.fill")
+                .font(.system(size: 40))
+                .foregroundColor(.green)
+
+            VStack(alignment: .leading) {
+                Text("Rides")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                Text("\(rideCount)")
+                    .font(.title)
+                    .fontWeight(.bold)
+            }
+
+            Spacer()
+        }
+        .padding()
+        .background(Color.cardBackground)
+        .cornerRadius(12)
+    }
+
+    private var dailyDistanceChart: some View {
+        let dailyData = dataManager.dailyDistancesForWeek(startDate: currentWeekStart)
+
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Daily Distances")
+                .font(.headline)
+                .padding(.horizontal)
+
+            Chart(dailyData, id: \.date) { item in
+                BarMark(
+                    x: .value("Day", item.date, unit: .day),
+                    y: .value("Distance", item.distance)
+                )
+                .foregroundStyle(.blue)
+            }
+            .chartXAxis {
+                AxisMarks(values: .stride(by: .day)) { _ in
+                    AxisValueLabel(format: .dateTime.weekday(.abbreviated))
+                }
+            }
+            .chartYAxis {
+                AxisMarks { value in
+                    AxisValueLabel {
+                        if let distance = value.as(Double.self) {
+                            Text("\(Int(distance)) km")
+                        }
+                    }
+                }
+            }
+            .frame(height: 250)
+            .padding()
+        }
+        .background(Color.cardBackground)
+        .cornerRadius(12)
+    }
+
+    // MARK: - Toolbar
+
+    private var toolbarMenu: some ToolbarContent {
+        #if os(iOS)
+        ToolbarItem(placement: .navigationBarTrailing) {
+            menuContent
+        }
+        #else
+        ToolbarItem(placement: .automatic) {
+            menuContent
+        }
+        #endif
+    }
+
+    private var menuContent: some View {
+        Menu {
+            Button(action: {
+                Task {
+                    if let token = try? await oauthManager.getValidAccessToken() {
+                        await dataManager.fetchActivities(accessToken: token)
+                    }
+                }
+            }) {
+                Label("Refresh Activities", systemImage: "arrow.clockwise")
+            }
+
+            Button(action: {
+                showingTokenInput = true
+            }) {
+                Label(oauthManager.isAuthenticated ? "Reconnect" : "Connect to Strava", systemImage: "key")
+            }
+
+            if oauthManager.isAuthenticated {
+                Button(action: {
+                    oauthManager.disconnect()
+                    showingTokenInput = true
+                }) {
+                    Label("Disconnect", systemImage: "xmark.circle")
+                }
+            }
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
+    }
+
+    // MARK: - Week Navigation
+
+    private var weekDateRange: String {
+        let calendar = Calendar.current
+        guard let weekEnd = calendar.date(byAdding: .day, value: 6, to: currentWeekStart) else {
+            return ""
+        }
+
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d"
+
+        let startString = formatter.string(from: currentWeekStart)
+        let endString = formatter.string(from: weekEnd)
+
+        let yearFormatter = DateFormatter()
+        yearFormatter.dateFormat = "yyyy"
+        let yearString = yearFormatter.string(from: currentWeekStart)
+
+        return "\(startString) - \(endString), \(yearString)"
+    }
+
+    private func previousWeek() {
+        let calendar = Calendar.current
+        if let newDate = calendar.date(byAdding: .day, value: -7, to: currentWeekStart) {
+            currentWeekStart = newDate
+        }
+    }
+
+    private func nextWeek() {
+        let calendar = Calendar.current
+        if let newDate = calendar.date(byAdding: .day, value: 7, to: currentWeekStart) {
+            currentWeekStart = newDate
+        }
+    }
+
+    private func goToCurrentWeek() {
+        currentWeekStart = Date().startOfWeek()
+    }
+
+    private func canGoToPreviousWeek() -> Bool {
+        guard let firstActivityDate = dataManager.firstActivityDate() else {
+            return false
+        }
+        return currentWeekStart > firstActivityDate
+    }
+
+    private func canGoToNextWeek() -> Bool {
+        let thisWeekStart = Date().startOfWeek()
+        return currentWeekStart < thisWeekStart
+    }
+
+    // MARK: - Token Management
+
+    private func loadAccessToken() {
+        if let token = UserDefaults.standard.string(forKey: "stravaAccessToken") {
+            accessToken = token
+        }
+    }
+}
+
+// MARK: - Extensions
+
+extension Date {
+    /// Get the start of the week (Monday) for this date
+    func startOfWeek() -> Date {
+        let calendar = Calendar.current
+        let components = calendar.dateComponents([.yearForWeekOfYear, .weekOfYear], from: self)
+        return calendar.date(from: components) ?? self
+    }
+}
+
+extension Color {
+    /// Cross-platform system gray 6 color
+    static var cardBackground: Color {
+        #if os(iOS)
+        return Color(uiColor: .systemGray6)
+        #else
+        return Color(nsColor: .controlBackgroundColor)
+        #endif
+    }
+}
+
+#Preview {
+    WeeklyDistanceView()
+}

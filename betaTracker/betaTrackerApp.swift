@@ -11,7 +11,7 @@ import SwiftUI
 struct betaTrackerApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            WeeklyDistanceView()
         }
     }
 }
