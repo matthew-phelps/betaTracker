@@ -25,6 +25,7 @@ struct WeeklyDistanceView: View {
 
     // Chart type selection
     enum ChartType: String, CaseIterable, Identifiable {
+        case currentWeek = "Current Week"
         case weekly = "Weekly Summary"
         case rolling = "12-Month Rolling"
 
@@ -32,6 +33,7 @@ struct WeeklyDistanceView: View {
 
         var icon: String {
             switch self {
+            case .currentWeek: return "calendar"
             case .weekly: return "chart.line.uptrend.xyaxis"
             case .rolling: return "chart.xyaxis.line"
             }
@@ -200,8 +202,8 @@ struct WeeklyDistanceView: View {
 
                 Divider()
 
-                // Date navigation (only show for weekly view)
-                if selectedChartType == .weekly {
+                // Date navigation (show for current week and weekly views)
+                if selectedChartType == .currentWeek || selectedChartType == .weekly {
                     VStack(alignment: .leading, spacing: 10) {
                         Text("Date Range")
                             .font(.headline)
@@ -258,16 +260,11 @@ struct WeeklyDistanceView: View {
             // Chart content
             ScrollView {
                 VStack(spacing: 25) {
-                    // Stats cards
-                    HStack(spacing: 20) {
-                        totalDistanceCard
-                        rideCountCard
-                    }
-                    .padding(.horizontal)
-
-                    // Selected chart
+                    // Selected chart/card
                     Group {
                         switch selectedChartType {
+                        case .currentWeek:
+                            currentWeekStatsCard
                         case .weekly:
                             weeklyChartCard
                         case .rolling:
@@ -373,6 +370,69 @@ struct WeeklyDistanceView: View {
                 .buttonStyle(PlainButtonStyle())
             }
         }
+    }
+
+    // MARK: - Current Week Stats Card
+
+    private var currentWeekStatsCard: some View {
+        VStack(spacing: 30) {
+            // Header
+            VStack(spacing: 5) {
+                Text(weekDateRange)
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                Text("Week Summary")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.top)
+
+            // Large distance display
+            VStack(spacing: 15) {
+                Text("Total Distance")
+                    .font(.headline)
+                    .foregroundColor(.secondary)
+
+                let totalDistance = dataManager.totalDistanceForWeek(startDate: currentWeekStart, activityType: selectedActivityType)
+                Text(String(format: "%.1f", totalDistance))
+                    .font(.system(size: 80, weight: .bold, design: .rounded))
+                    .foregroundColor(.blue)
+
+                Text("kilometers")
+                    .font(.title3)
+                    .foregroundColor(.secondary)
+            }
+
+            Divider()
+                .padding(.horizontal, 40)
+
+            // Activities count
+            let rideCount = dataManager.activitiesForWeek(startDate: currentWeekStart, activityType: selectedActivityType).count
+            let activityLabel = activityCountLabel(for: selectedActivityType, count: rideCount)
+
+            HStack(spacing: 40) {
+                VStack(spacing: 10) {
+                    Image(systemName: activityIcon(for: selectedActivityType))
+                        .font(.system(size: 50))
+                        .foregroundColor(.green)
+
+                    Text("\(rideCount)")
+                        .font(.system(size: 48, weight: .bold, design: .rounded))
+                        .foregroundColor(.primary)
+
+                    Text(activityLabel)
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+            }
+
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
+        .background(Color.cardBackground)
+        .cornerRadius(12)
     }
 
     private var totalDistanceCard: some View {
@@ -519,7 +579,34 @@ struct WeeklyDistanceView: View {
     }
 
     private var rollingChartCard: some View {
-        let rollingData = dataManager.getRolling12MonthTotals(days: rollingDays, activityType: selectedActivityType)
+        let currentPeriodData = dataManager.getRolling12MonthTotals(days: rollingDays, activityType: selectedActivityType, dayOffset: 0)
+        let previousPeriodData = dataManager.getRolling12MonthTotals(days: rollingDays, activityType: selectedActivityType, dayOffset: -rollingDays)
+
+        // Define colors for the chart
+        let currentPeriodColor: Color = .purple
+        let previousPeriodColor: Color = .orange
+
+        // Transform to relative days with original dates preserved for current period
+        // Day 0 = today (most recent), counting backwards
+        let chartData: [(relativeDay: Int, total: Double, period: String, actualDate: Date?)] = {
+            var data: [(relativeDay: Int, total: Double, period: String, actualDate: Date?)] = []
+
+            // Current period: day 0 is most recent (today), day -N is oldest
+            let currentCount = currentPeriodData.count
+            for (index, item) in currentPeriodData.enumerated() {
+                let daysAgo = -(currentCount - 1 - index) // 0 for most recent, -N for oldest
+                data.append((relativeDay: daysAgo, total: item.total, period: "Current", actualDate: item.date))
+            }
+
+            // Previous period: same relative days, no actual dates
+            let previousCount = previousPeriodData.count
+            for (index, item) in previousPeriodData.enumerated() {
+                let daysAgo = -(previousCount - 1 - index)
+                data.append((relativeDay: daysAgo, total: item.total, period: "Previous", actualDate: nil))
+            }
+
+            return data
+        }()
 
         return VStack(alignment: .leading, spacing: 15) {
             HStack {
@@ -553,26 +640,42 @@ struct WeeklyDistanceView: View {
             .padding(.horizontal)
             .padding(.top)
 
-            if rollingData.isEmpty {
+            if chartData.isEmpty {
                 Text("Not enough data for rolling calculation")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, alignment: .center)
                     .padding(40)
             } else {
-                Chart(rollingData, id: \.date) { item in
+                Chart(chartData, id: \.relativeDay) { item in
                     LineMark(
-                        x: .value("Date", item.date, unit: .day),
+                        x: .value("Day", item.relativeDay),
                         y: .value("Total", item.total)
                     )
-                    .foregroundStyle(.purple)
-                    .lineStyle(StrokeStyle(lineWidth: 2.5))
+                    .foregroundStyle(by: .value("Period", item.period))
+                    .lineStyle(by: .value("Period", item.period))
                 }
+                .chartForegroundStyleScale([
+                    "Current": currentPeriodColor,
+                    "Previous": previousPeriodColor
+                ])
+                .chartLineStyleScale([
+                    "Current": StrokeStyle(lineWidth: 2.5),
+                    "Previous": StrokeStyle(lineWidth: 2, dash: [5, 3])
+                ])
                 .chartXAxis {
-                    AxisMarks(values: .stride(by: .month)) { value in
-                        if let date = value.as(Date.self) {
+                    // Primary axis: Relative days (0 = today, negative = past)
+                    AxisMarks(values: .stride(by: 30)) { value in
+                        if let day = value.as(Int.self) {
                             AxisValueLabel {
-                                Text(date.formatted(.dateTime.month(.abbreviated)))
+                                if day == 0 {
+                                    Text("Today")
+                                        .font(.caption)
+                                        .fontWeight(.semibold)
+                                } else {
+                                    Text("\(day)d")
+                                        .font(.caption)
+                                }
                             }
                             AxisGridLine()
                             AxisTick()
@@ -590,12 +693,48 @@ struct WeeklyDistanceView: View {
                     }
                 }
                 .frame(height: 350)
-                .padding()
-                .animation(.none, value: rollingDays)
+                .padding(.horizontal)
+
+                // Secondary calendar date axis
+                calendarDateAxis(chartData: chartData, dateColor: currentPeriodColor)
+                    .padding(.horizontal)
+                    .padding(.bottom)
+
+                Spacer().frame(height: 10)
             }
         }
         .background(Color.cardBackground)
         .cornerRadius(12)
+    }
+
+    // Helper view for calendar date axis
+    private func calendarDateAxis(chartData: [(relativeDay: Int, total: Double, period: String, actualDate: Date?)], dateColor: Color) -> some View {
+        GeometryReader { geometry in
+            let currentPeriodData = chartData.filter { $0.period == "Current" && $0.actualDate != nil }.sorted { $0.relativeDay < $1.relativeDay }
+            let minDay = currentPeriodData.first?.relativeDay ?? -rollingDays // Most negative (oldest)
+            let maxDay = 0 // Today
+
+            // Show dates at intervals (working backwards from 0)
+            let dateInterval = abs(minDay) / 6 // Show ~6 date labels
+
+            HStack(spacing: 0) {
+                ForEach(0..<7) { index in
+                    let targetDay = minDay + (index * dateInterval) // e.g., -180, -150, -120, ..., 0
+                    if let dataPoint = currentPeriodData.first(where: { abs($0.relativeDay - targetDay) < 5 }),
+                       let date = dataPoint.actualDate {
+
+                        Text(date.formatted(.dateTime.month(.abbreviated).day()))
+                            .font(.caption2)
+                            .foregroundColor(dateColor)
+                            .frame(maxWidth: .infinity, alignment: index == 0 ? .leading : index == 6 ? .trailing : .center)
+                    } else {
+                        Text("")
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+        }
+        .frame(height: 20)
     }
 
     // MARK: - Weekly Data Calculation

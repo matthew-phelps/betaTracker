@@ -306,7 +306,11 @@ class ActivityDataManager: ObservableObject {
     }
 
     /// Calculate rolling 12-month totals for the specified number of days, optionally filtered by activity type
-    func getRolling12MonthTotals(days: Int, activityType: String? = nil) -> [(date: Date, total: Double)] {
+    /// - Parameters:
+    ///   - days: Number of days to show in the chart
+    ///   - activityType: Optional activity type filter
+    ///   - dayOffset: Offset to apply (0 for current period, negative for previous period)
+    func getRolling12MonthTotals(days: Int, activityType: String? = nil, dayOffset: Int = 0) -> [(date: Date, total: Double)] {
         let dailyTotals = getDailyTotals(activityType: activityType)
         guard !dailyTotals.isEmpty else { return [] }
 
@@ -316,8 +320,15 @@ class ActivityDataManager: ObservableObject {
         // Get the most recent date
         guard let mostRecentDate = dailyTotals.last?.date else { return [] }
 
-        // Calculate rolling totals for the last N days
-        let startDate = calendar.date(byAdding: .day, value: -days, to: mostRecentDate) ?? mostRecentDate
+        // Apply offset to get the end date for this period
+        guard let offsetEndDate = calendar.date(byAdding: .day, value: dayOffset, to: mostRecentDate) else {
+            return []
+        }
+
+        // Calculate rolling totals for the last N days from the offset end date
+        guard let startDate = calendar.date(byAdding: .day, value: -days, to: offsetEndDate) else {
+            return []
+        }
 
         // Create a date lookup for daily totals
         var dailyLookup: [Date: Double] = [:]
@@ -327,7 +338,7 @@ class ActivityDataManager: ObservableObject {
 
         // For each day in range, calculate 12-month rolling sum
         var currentDate = startDate
-        while currentDate <= mostRecentDate {
+        while currentDate <= offsetEndDate {
             // Get date 12 months ago
             guard let twelveMonthsAgo = calendar.date(byAdding: .day, value: -365, to: currentDate) else {
                 currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate)!
