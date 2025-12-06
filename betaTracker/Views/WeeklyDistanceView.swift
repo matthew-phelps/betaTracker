@@ -16,6 +16,7 @@ struct WeeklyDistanceView: View {
     @State private var showingTokenInput = false
     @State private var currentWeekStart: Date = Date().startOfWeek()
     @State private var hasAttemptedInitialFetch = false
+    @State private var numberOfWeeks = 10 // Number of weeks to display in chart
 
     var body: some View {
         NavigationView {
@@ -204,23 +205,68 @@ struct WeeklyDistanceView: View {
     }
 
     private var dailyDistanceChart: some View {
-        let dailyData = dataManager.dailyDistancesForWeek(startDate: currentWeekStart)
+        let weeklyData = getWeeklyDistances()
 
-        return VStack(alignment: .leading, spacing: 10) {
-            Text("Daily Distances")
-                .font(.headline)
-                .padding(.horizontal)
+        return VStack(alignment: .leading, spacing: 15) {
+            HStack {
+                Text("Weekly Distances")
+                    .font(.headline)
 
-            Chart(dailyData, id: \.date) { item in
-                BarMark(
-                    x: .value("Day", item.date, unit: .day),
+                Spacer()
+
+                // Week count picker
+                Menu {
+                    ForEach([4, 8, 10, 12, 16, 20, 26], id: \.self) { weeks in
+                        Button("\(weeks) weeks") {
+                            numberOfWeeks = weeks
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text("\(numberOfWeeks) weeks")
+                            .font(.subheadline)
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                    }
+                    .foregroundColor(.blue)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.blue.opacity(0.1))
+                    .cornerRadius(8)
+                }
+            }
+            .padding(.horizontal)
+
+            Chart(weeklyData, id: \.weekStart) { item in
+                LineMark(
+                    x: .value("Week", item.weekStart, unit: .weekOfYear),
                     y: .value("Distance", item.distance)
                 )
                 .foregroundStyle(.blue)
+                .lineStyle(StrokeStyle(lineWidth: 3))
+
+                PointMark(
+                    x: .value("Week", item.weekStart, unit: .weekOfYear),
+                    y: .value("Distance", item.distance)
+                )
+                .foregroundStyle(.blue)
+                .symbolSize(60)
             }
             .chartXAxis {
-                AxisMarks(values: .stride(by: .day)) { _ in
-                    AxisValueLabel(format: .dateTime.weekday(.abbreviated))
+                AxisMarks(values: .stride(by: .weekOfYear)) { value in
+                    if let date = value.as(Date.self) {
+                        AxisValueLabel {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(date.formatted(.dateTime.month(.abbreviated)))
+                                    .font(.caption2)
+                                Text(date.formatted(.dateTime.day()))
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                            }
+                        }
+                        AxisGridLine()
+                        AxisTick()
+                    }
                 }
             }
             .chartYAxis {
@@ -230,13 +276,36 @@ struct WeeklyDistanceView: View {
                             Text("\(Int(distance)) km")
                         }
                     }
+                    AxisGridLine()
                 }
             }
-            .frame(height: 250)
+            .frame(height: 280)
             .padding()
         }
         .background(Color.cardBackground)
         .cornerRadius(12)
+    }
+
+    // MARK: - Weekly Data Calculation
+
+    /// Get weekly distance totals for the specified number of weeks
+    private func getWeeklyDistances() -> [(weekStart: Date, distance: Double)] {
+        let calendar = Calendar.current
+        var weeklyData: [(weekStart: Date, distance: Double)] = []
+
+        // Start from current week and go back
+        let currentWeek = Date().startOfWeek()
+
+        for weekOffset in (0..<numberOfWeeks).reversed() {
+            guard let weekStart = calendar.date(byAdding: .weekOfYear, value: -weekOffset, to: currentWeek) else {
+                continue
+            }
+
+            let distance = dataManager.totalDistanceForWeek(startDate: weekStart)
+            weeklyData.append((weekStart: weekStart, distance: distance))
+        }
+
+        return weeklyData
     }
 
     // MARK: - Toolbar
