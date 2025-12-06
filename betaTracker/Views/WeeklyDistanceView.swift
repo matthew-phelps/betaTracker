@@ -17,6 +17,7 @@ struct WeeklyDistanceView: View {
     @State private var currentWeekStart: Date = Date().startOfWeek()
     @State private var hasAttemptedInitialFetch = false
     @State private var numberOfWeeks = 10 // Number of weeks to display in chart
+    @State private var rollingDays = 365 // Number of days to show in rolling chart
 
     // Cache current week to avoid recalculation
     private let currentWeek = Date().startOfWeek()
@@ -119,8 +120,11 @@ struct WeeklyDistanceView: View {
                 // Number of rides
                 rideCountCard
 
-                // Daily distances chart
+                // Weekly distances chart
                 dailyDistanceChart
+
+                // Rolling 12-month chart
+                rolling12MonthChart
 
                 // Last updated timestamp
                 if let lastUpdate = dataManager.lastCacheDate() {
@@ -305,6 +309,84 @@ struct WeeklyDistanceView: View {
             previousYear: StrokeStyle(lineWidth: 2, dash: [5, 3])
         ])
         .animation(.none, value: numberOfWeeks)
+    }
+
+    private var rolling12MonthChart: some View {
+        let rollingData = dataManager.getRolling12MonthTotals(days: rollingDays)
+
+        return VStack(alignment: .leading, spacing: 15) {
+            HStack {
+                Text("12-Month Rolling Total")
+                    .font(.headline)
+
+                Spacer()
+
+                // Days count picker
+                Menu {
+                    ForEach([180, 365, 730], id: \.self) { days in
+                        Button(days == 365 ? "1 year" : days == 730 ? "2 years" : "6 months") {
+                            rollingDays = days
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 4) {
+                        Text(rollingDays == 365 ? "1 year" : rollingDays == 730 ? "2 years" : "6 months")
+                            .font(.subheadline)
+                        Image(systemName: "chevron.down")
+                            .font(.caption)
+                    }
+                    .foregroundColor(.purple)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.purple.opacity(0.1))
+                    .cornerRadius(8)
+                }
+            }
+            .padding(.horizontal)
+
+            if rollingData.isEmpty {
+                Text("Not enough data for rolling calculation")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+                    .padding()
+            } else {
+                Chart(rollingData, id: \.date) { item in
+                    LineMark(
+                        x: .value("Date", item.date, unit: .day),
+                        y: .value("Total", item.total)
+                    )
+                    .foregroundStyle(.purple)
+                    .lineStyle(StrokeStyle(lineWidth: 2.5))
+                }
+                .chartXAxis {
+                    AxisMarks(values: .stride(by: .month)) { value in
+                        if let date = value.as(Date.self) {
+                            AxisValueLabel {
+                                Text(date.formatted(.dateTime.month(.abbreviated)))
+                            }
+                            AxisGridLine()
+                            AxisTick()
+                        }
+                    }
+                }
+                .chartYAxis {
+                    AxisMarks { value in
+                        AxisValueLabel {
+                            if let total = value.as(Double.self) {
+                                Text("\(Int(total)) km")
+                            }
+                        }
+                        AxisGridLine()
+                    }
+                }
+                .frame(height: 250)
+                .padding()
+                .animation(.none, value: rollingDays)
+            }
+        }
+        .background(Color.cardBackground)
+        .cornerRadius(12)
     }
 
     // MARK: - Weekly Data Calculation

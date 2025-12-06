@@ -187,4 +187,70 @@ class ActivityDataManager: ObservableObject {
 
         print("DEBUG: Built weekly cache with \(weeklyTotalsCache.count) weeks")
     }
+
+    // MARK: - Daily and Rolling Calculations
+
+    /// Get daily distance totals sorted by date
+    func getDailyTotals() -> [(date: Date, distance: Double)] {
+        var dailyGroups: [Date: Double] = [:]
+
+        // Sum distances for each day
+        for activity in activities {
+            dailyGroups[activity.localDate, default: 0] += activity.distanceKm
+        }
+
+        // Convert to array and sort by date
+        return dailyGroups
+            .map { (date: $0.key, distance: $0.value) }
+            .sorted { $0.date < $1.date }
+    }
+
+    /// Calculate rolling 12-month totals for the specified number of days
+    func getRolling12MonthTotals(days: Int) -> [(date: Date, total: Double)] {
+        let dailyTotals = getDailyTotals()
+        guard !dailyTotals.isEmpty else { return [] }
+
+        let calendar = Calendar.current
+        var result: [(date: Date, total: Double)] = []
+
+        // Get the most recent date
+        guard let mostRecentDate = dailyTotals.last?.date else { return [] }
+
+        // Calculate rolling totals for the last N days
+        let startDate = calendar.date(byAdding: .day, value: -days, to: mostRecentDate) ?? mostRecentDate
+
+        // Create a date lookup for daily totals
+        var dailyLookup: [Date: Double] = [:]
+        for item in dailyTotals {
+            dailyLookup[item.date] = item.distance
+        }
+
+        // For each day in range, calculate 12-month rolling sum
+        var currentDate = startDate
+        while currentDate <= mostRecentDate {
+            // Get date 12 months ago
+            guard let twelveMonthsAgo = calendar.date(byAdding: .day, value: -365, to: currentDate) else {
+                currentDate = calendar.date(byAdding: .day, value: 1, to: currentDate)!
+                continue
+            }
+
+            // Sum all distances in the 365-day window
+            var rollingSum = 0.0
+            var checkDate = twelveMonthsAgo
+            while checkDate <= currentDate {
+                if let distance = dailyLookup[checkDate] {
+                    rollingSum += distance
+                }
+                guard let nextDate = calendar.date(byAdding: .day, value: 1, to: checkDate) else { break }
+                checkDate = nextDate
+            }
+
+            result.append((date: currentDate, total: rollingSum))
+
+            guard let nextDate = calendar.date(byAdding: .day, value: 1, to: currentDate) else { break }
+            currentDate = nextDate
+        }
+
+        return result
+    }
 }
