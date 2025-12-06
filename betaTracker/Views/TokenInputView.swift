@@ -115,6 +115,13 @@ struct TokenInputView: View {
             #if os(iOS)
             .navigationBarTitleDisplayMode(.inline)
             #endif
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Cancel") {
+                        dismiss()
+                    }
+                }
+            }
             .onAppear {
                 oauthManager.checkAuthenticationStatus()
             }

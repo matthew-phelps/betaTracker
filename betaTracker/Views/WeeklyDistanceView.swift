@@ -12,8 +12,10 @@ import Charts
 struct WeeklyDistanceView: View {
     @StateObject private var dataManager = ActivityDataManager()
     @StateObject private var oauthManager = StravaOAuthManager.shared
+    @StateObject private var profileManager = ProfileManager.shared
     @State private var accessToken: String = ""
     @State private var showingTokenInput = false
+    @State private var showingProfileManagement = false
     @State private var currentWeekStart: Date = Date().startOfWeek()
     @State private var hasAttemptedInitialFetch = false
     @State private var numberOfWeeks = 10 // Number of weeks to display in chart
@@ -26,7 +28,32 @@ struct WeeklyDistanceView: View {
     var body: some View {
         NavigationView {
             Group {
-                if dataManager.isLoading {
+                if profileManager.currentProfile == nil {
+                    // No profile selected - prompt to create one
+                    VStack(spacing: 20) {
+                        Image(systemName: "person.3")
+                            .font(.system(size: 60))
+                            .foregroundColor(.blue)
+                        Text("Welcome to Strava Tracker")
+                            .font(.title)
+                            .fontWeight(.bold)
+                        Text("Create a profile to get started")
+                            .font(.body)
+                            .foregroundColor(.secondary)
+                        Button(action: {
+                            showingProfileManagement = true
+                        }) {
+                            Label("Create Profile", systemImage: "plus.circle.fill")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                                .padding()
+                                .background(Color.blue)
+                                .cornerRadius(10)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                    .padding()
+                } else if dataManager.isLoading {
                     VStack {
                         ProgressView("Loading activities...")
                             .padding()
@@ -77,6 +104,9 @@ struct WeeklyDistanceView: View {
             .sheet(isPresented: $showingTokenInput) {
                 TokenInputView(accessToken: $accessToken)
             }
+            .sheet(isPresented: $showingProfileManagement) {
+                ProfileManagementView()
+            }
             .onAppear {
                 // Check OAuth authentication status
                 oauthManager.checkAuthenticationStatus()
@@ -106,12 +136,20 @@ struct WeeklyDistanceView: View {
                     }
                 }
             }
+            .onChange(of: profileManager.currentProfile?.id) { _ in
+                // Reload data when profile changes
+                dataManager.reloadForCurrentProfile()
+                oauthManager.checkAuthenticationStatus()
+            }
         }
     }
 
     private var weeklyStatsView: some View {
         ScrollView {
             VStack(spacing: 25) {
+                // Profile selector
+                ProfileSelectorView(showingProfileManagement: $showingProfileManagement)
+
                 // Week navigation
                 weekNavigationView
 
@@ -518,6 +556,20 @@ struct WeeklyDistanceView: View {
                 }) {
                     Label("Disconnect", systemImage: "xmark.circle")
                 }
+            }
+
+            Divider()
+
+            Button(action: {
+                showingProfileManagement = true
+            }) {
+                Label("Manage Profiles", systemImage: "person.2")
+            }
+
+            Button(action: {
+                dataManager.clearCache()
+            }) {
+                Label("Clear Cache", systemImage: "trash")
             }
         } label: {
             Image(systemName: "ellipsis.circle")

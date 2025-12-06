@@ -16,8 +16,20 @@ class ActivityDataManager: ObservableObject {
     @Published var errorMessage: String?
     @Published var availableActivityTypes: [String] = []
 
-    private let cacheKey = "cachedStravaActivities"
-    private let cacheTimestampKey = "activitiesCacheTimestamp"
+    private var cacheKey: String {
+        guard let profileID = ProfileManager.shared.currentProfile?.id.uuidString else {
+            return "cachedStravaActivities_default"
+        }
+        return "cachedStravaActivities_\(profileID)"
+    }
+
+    private var cacheTimestampKey: String {
+        guard let profileID = ProfileManager.shared.currentProfile?.id.uuidString else {
+            return "activitiesCacheTimestamp_default"
+        }
+        return "activitiesCacheTimestamp_\(profileID)"
+    }
+
     private var isFetching = false // Prevent concurrent fetches
 
     // Cached weekly totals for performance, keyed by activity type
@@ -27,6 +39,14 @@ class ActivityDataManager: ObservableObject {
         loadCachedActivities()
         updateAvailableActivityTypes()
         buildWeeklyTotalsCache()
+    }
+
+    /// Reload data for the current profile (call when switching profiles)
+    func reloadForCurrentProfile() {
+        loadCachedActivities()
+        updateAvailableActivityTypes()
+        buildWeeklyTotalsCache()
+        print("DEBUG: Reloaded data for current profile - \(activities.count) activities")
     }
 
     /// Fetch activities from Strava and cache them
@@ -64,7 +84,10 @@ class ActivityDataManager: ObservableObject {
             // Rebuild weekly totals cache
             buildWeeklyTotalsCache()
 
-            print("DEBUG: Successfully fetched and cached \(activities.count) cycling activities")
+            // Update profile's last synced timestamp
+            ProfileManager.shared.updateLastSyncedTimestamp()
+
+            print("DEBUG: Successfully fetched and cached \(activities.count) activities")
 
             isLoading = false
             isFetching = false
@@ -178,6 +201,16 @@ class ActivityDataManager: ObservableObject {
     /// Get the last cache timestamp
     func lastCacheDate() -> Date? {
         UserDefaults.standard.object(forKey: cacheTimestampKey) as? Date
+    }
+
+    /// Clear all cached data for the current user
+    func clearCache() {
+        UserDefaults.standard.removeObject(forKey: cacheKey)
+        UserDefaults.standard.removeObject(forKey: cacheTimestampKey)
+        activities = []
+        availableActivityTypes = []
+        weeklyTotalsCache.removeAll()
+        print("DEBUG: Cleared cache for current user")
     }
 
     // MARK: - Performance Optimization

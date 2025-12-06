@@ -14,24 +14,51 @@ import Combine
 class StravaOAuthManager: ObservableObject {
     static let shared = StravaOAuthManager()
 
-    // Strava OAuth credentials
-    private let clientID = "188741"
-    private let clientSecret = "7b31247cf6e16cfd134406b4db458e2a31e26e01"
+    // Strava OAuth configuration
     private let redirectURI = "http://localhost:8080/callback"
 
     // Local server for OAuth callback
     private var localServer: LocalOAuthServer?
 
-    // Token storage keys
-    private let accessTokenKey = "stravaAccessToken"
-    private let refreshTokenKey = "stravaRefreshToken"
-    private let tokenExpirationKey = "stravaTokenExpiration"
+    // Token storage keys (now profile-specific)
+    private var accessTokenKey: String {
+        guard let profileID = ProfileManager.shared.currentProfile?.id.uuidString else {
+            return "stravaAccessToken_default"
+        }
+        return "stravaAccessToken_\(profileID)"
+    }
+
+    private var refreshTokenKey: String {
+        guard let profileID = ProfileManager.shared.currentProfile?.id.uuidString else {
+            return "stravaRefreshToken_default"
+        }
+        return "stravaRefreshToken_\(profileID)"
+    }
+
+    private var tokenExpirationKey: String {
+        guard let profileID = ProfileManager.shared.currentProfile?.id.uuidString else {
+            return "stravaTokenExpiration_default"
+        }
+        return "stravaTokenExpiration_\(profileID)"
+    }
 
     @Published var isAuthenticated = false
     @Published var isAuthenticating = false
 
     private init() {
         checkAuthenticationStatus()
+    }
+
+    // MARK: - Credential Management
+
+    /// Get the current Client ID from current profile
+    func getClientID() -> String? {
+        return ProfileManager.shared.currentProfile?.clientID
+    }
+
+    /// Get the current Client Secret from current profile
+    func getClientSecret() -> String? {
+        return ProfileManager.shared.currentProfile?.clientSecret
     }
 
     /// Check if user is currently authenticated
@@ -93,6 +120,11 @@ class StravaOAuthManager: ObservableObject {
 
     /// Build the OAuth authorization URL
     private func buildAuthorizationURL() -> URL? {
+        guard let clientID = getClientID() else {
+            print("ERROR: No client ID configured")
+            return nil
+        }
+
         var components = URLComponents(string: "https://www.strava.com/oauth/authorize")
         components?.queryItems = [
             URLQueryItem(name: "client_id", value: clientID),
@@ -130,6 +162,10 @@ class StravaOAuthManager: ObservableObject {
 
     /// Exchange authorization code for access token
     private func exchangeCodeForToken(code: String) async throws {
+        guard let clientID = getClientID(), let clientSecret = getClientSecret() else {
+            throw OAuthError.noCredentials
+        }
+
         let url = URL(string: "https://www.strava.com/oauth/token")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -212,6 +248,10 @@ class StravaOAuthManager: ObservableObject {
             throw OAuthError.noRefreshToken
         }
 
+        guard let clientID = getClientID(), let clientSecret = getClientSecret() else {
+            throw OAuthError.noCredentials
+        }
+
         print("DEBUG: Refreshing access token...")
 
         let url = URL(string: "https://www.strava.com/oauth/token")!
@@ -251,13 +291,13 @@ class StravaOAuthManager: ObservableObject {
         UserDefaults.standard.set(tokenResponse.expiresAt, forKey: tokenExpirationKey)
     }
 
-    /// Disconnect/logout
+    /// Disconnect/logout current profile
     func disconnect() {
         UserDefaults.standard.removeObject(forKey: accessTokenKey)
         UserDefaults.standard.removeObject(forKey: refreshTokenKey)
         UserDefaults.standard.removeObject(forKey: tokenExpirationKey)
         isAuthenticated = false
-        print("DEBUG: Disconnected from Strava")
+        print("DEBUG: Disconnected from Strava for current profile")
     }
 }
 
@@ -283,6 +323,7 @@ enum OAuthError: LocalizedError {
     case tokenRefreshFailed(statusCode: Int)
     case noTokenAvailable
     case noRefreshToken
+    case noCredentials
 
     var errorDescription: String? {
         switch self {
@@ -296,6 +337,8 @@ enum OAuthError: LocalizedError {
             return "No access token available. Please connect to Strava."
         case .noRefreshToken:
             return "No refresh token available. Please reconnect to Strava."
+        case .noCredentials:
+            return "No API credentials configured. Please go to Settings and enter your Strava API credentials."
         }
     }
 }
